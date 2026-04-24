@@ -827,10 +827,10 @@ with tab_piper:
                               min(5000, len(df)), step=500)
             sample = df.sample(min(n_max, len(df)), random_state=42)
 
-        # meq/L conversion
-        # Atomic weights (g/mol) / charge
+        # --- meq/L conversion ---
+        # Atomic weights (g/mol) divided by absolute charge
         meq_factors = {
-            "CALCIUM":             40.08 / 2,  # mg/mmol ÷ charge
+            "CALCIUM":             40.08 / 2,
             "MAGNESIUM":           24.31 / 2,
             "MAGNÉSIUM":           24.31 / 2,
             "SODIUM":              22.99 / 1,
@@ -850,120 +850,227 @@ with tab_piper:
         if len(meq) < 2:
             st.warning("Not enough valid rows after meq/L conversion.")
         else:
-            # Sums
+            # --- Percentages of each cation / anion over their respective sum ---
             cat_sum = meq["CALCIUM"] + meq["MAGNESIUM"] + meq["SODIUM"] + meq["POTASSIUM"]
             an_sum  = meq["HYDROGENOCARBONATES"] + meq["CHLORURES"] + meq["SULFATES"]
+            # Drop rows with null sums
+            valid = (cat_sum > 0) & (an_sum > 0)
+            meq = meq[valid]
+            cat_sum = cat_sum[valid]
+            an_sum  = an_sum[valid]
 
-            ca_pct = 100 * meq["CALCIUM"] / cat_sum
-            mg_pct = 100 * meq["MAGNESIUM"] / cat_sum
-            nak_pct = 100 * (meq["SODIUM"] + meq["POTASSIUM"]) / cat_sum
+            # Fractions (0-1) — normalized
+            ca   = (meq["CALCIUM"] / cat_sum).values
+            mg   = (meq["MAGNESIUM"] / cat_sum).values
+            nak  = ((meq["SODIUM"] + meq["POTASSIUM"]) / cat_sum).values
+            hco3 = (meq["HYDROGENOCARBONATES"] / an_sum).values
+            cl   = (meq["CHLORURES"] / an_sum).values
+            so4  = (meq["SULFATES"] / an_sum).values
 
-            hco3_pct = 100 * meq["HYDROGENOCARBONATES"] / an_sum
-            cl_pct   = 100 * meq["CHLORURES"] / an_sum
-            so4_pct  = 100 * meq["SULFATES"] / an_sum
-
-            # Coords on the standard Piper layout
+            # =====================================================
+            # Canonical Piper diagram geometry (Piper 1944/Hill 1940)
+            # =====================================================
+            # Triangles of side L=1, height h = sqrt(3)/2
+            # Cation triangle: base from (0,0) to (1,0), apex at (0.5, h)
+            #   - Ca    -> bottom-left  (0, 0)
+            #   - Na+K  -> bottom-right (1, 0)
+            #   - Mg    -> apex         (0.5, h)
+            # Anion triangle: shifted right by OFF = 2
+            # Diamond: apex down at (1.5, h), apex up at (1.5, 3h),
+            #          left apex (1, 2h), right apex (2, 2h)
+            # -----------------------------------------------------
             h = np.sqrt(3) / 2
-            # Cation triangle (left): Ca bottom-right, Mg top, Na+K bottom-left
-            cx = 0.5 * (2 * nak_pct + mg_pct) / 100
-            cy = h * mg_pct / 100
-            # Anion triangle (right) — offset horizontally by 1.5
-            off = 1.5
-            ax_ = off + 0.5 * (2 * cl_pct + so4_pct) / 100
-            ay_ = h * so4_pct / 100
-            # Diamond
-            # Project cation point up-right and anion point up-left, intersect
-            dx_from_c = cx + (1 + off) / 2
-            dy_from_c = cy + h + (1 + off) / 2 / np.sqrt(3) * 0
-            # Standard Piper diamond formula (Hill, 1940):
-            #   x = (cation_x + anion_x) / 2
-            #   y = ... (projection onto diamond)
-            # We use a simpler & widely used variant:
-            dx = (cx + ax_) / 2
-            dy = (cy + ay_) / 2 + h + 0.1
+            OFF = 2.0            # horizontal offset between triangle centers
+            GAP_Y = 0.25         # vertical gap between diamond bottom and triangle tops
+
+            # Cation point in left triangle
+            # Ca=(0,0), NaK=(1,0), Mg=(0.5, h)  -> barycentric
+            cx = ca * 0 + nak * 1 + mg * 0.5
+            cy = ca * 0 + nak * 0 + mg * h
+
+            # Anion point in right triangle (shifted by OFF)
+            # HCO3=(OFF,0), Cl=(OFF+1,0), SO4=(OFF+0.5,h)
+            ax_ = hco3 * OFF + cl * (OFF + 1) + so4 * (OFF + 0.5)
+            ay_ = hco3 * 0 + cl * 0 + so4 * h
+
+            # Diamond projection (canonical Piper 1944 construction).
+            # From the cation point, draw a line with slope +sqrt(3) (i.e. parallel
+            # to the diamond's lower-left edge). From the anion point, draw a line
+            # with slope -sqrt(3) (parallel to the lower-right edge). Their
+            # intersection is the diamond position.
+            # Solving the system analytically:
+            sq3 = np.sqrt(3)
+            dx = (ay_ - cy) / (2 * sq3) + (ax_ + cx) / 2
+            dy = cy + sq3 * (dx - cx)
 
             with c2:
                 fig = go.Figure()
 
-                # Triangle outlines
-                def tri(x0, y0, size=1.0):
-                    return dict(
-                        x=[x0, x0 + size, x0 + size / 2, x0],
-                        y=[y0, y0, y0 + size * h, y0],
-                    )
-                cation_tri = tri(0, 0)
-                anion_tri  = tri(off, 0)
-                for t in (cation_tri, anion_tri):
-                    fig.add_trace(go.Scatter(x=t["x"], y=t["y"], mode="lines",
-                                             line=dict(color="black", width=1),
-                                             hoverinfo="skip", showlegend=False))
+                # --- Triangle outlines ---
+                tri_color = "#333"
+                # Cation triangle
+                fig.add_trace(go.Scatter(
+                    x=[0, 1, 0.5, 0], y=[0, 0, h, 0],
+                    mode="lines", line=dict(color=tri_color, width=1.5),
+                    hoverinfo="skip", showlegend=False,
+                ))
+                # Anion triangle
+                fig.add_trace(go.Scatter(
+                    x=[OFF, OFF + 1, OFF + 0.5, OFF],
+                    y=[0, 0, h, 0],
+                    mode="lines", line=dict(color=tri_color, width=1.5),
+                    hoverinfo="skip", showlegend=False,
+                ))
+                # Diamond: 4 corners
+                #   bottom apex at (1.5, h)
+                #   left  apex at (1.0, 2h)
+                #   top   apex at (1.5, 3h)
+                #   right apex at (2.0, 2h)
+                diamond_x = [1.5, 1.0, 1.5, 2.0, 1.5]
+                diamond_y = [h,   2*h, 3*h, 2*h, h]
+                fig.add_trace(go.Scatter(
+                    x=diamond_x, y=diamond_y,
+                    mode="lines", line=dict(color=tri_color, width=1.5),
+                    hoverinfo="skip", showlegend=False,
+                ))
 
-                # Diamond (rotated square)
-                diamond_x = [(0.5 + off / 2), (off / 2 + 1), (0.5 + off / 2), (off / 2), (0.5 + off / 2)]
-                diamond_y = [h + 0.1, h + 0.1 + 0.5 * h, h + 0.1 + h, h + 0.1 + 0.5 * h, h + 0.1]
-                fig.add_trace(go.Scatter(x=diamond_x, y=diamond_y, mode="lines",
-                                         line=dict(color="black", width=1),
-                                         hoverinfo="skip", showlegend=False))
+                # --- Gridlines inside each shape (every 20%) ---
+                # Principle: for a triangle ABC, a line parallel to side BC at
+                # proportion t (0=A, 1=BC) goes from A+t*(B-A) to A+t*(C-A).
 
-                # Hover text
+                def add_triangle_grid(A, B, C, step=0.2, color="#DDD"):
+                    """Draw the 3 families of parallel gridlines inside a triangle."""
+                    A, B, C = np.array(A), np.array(B), np.array(C)
+                    for t in np.arange(step, 1.0 - 1e-9, step):
+                        # Lines parallel to BC (opposite of A)
+                        P1 = A + t * (B - A)
+                        P2 = A + t * (C - A)
+                        fig.add_trace(go.Scatter(
+                            x=[P1[0], P2[0]], y=[P1[1], P2[1]],
+                            mode="lines", line=dict(color=color, width=0.7),
+                            hoverinfo="skip", showlegend=False,
+                        ))
+                        # Lines parallel to AC (opposite of B)
+                        P1 = B + t * (A - B)
+                        P2 = B + t * (C - B)
+                        fig.add_trace(go.Scatter(
+                            x=[P1[0], P2[0]], y=[P1[1], P2[1]],
+                            mode="lines", line=dict(color=color, width=0.7),
+                            hoverinfo="skip", showlegend=False,
+                        ))
+                        # Lines parallel to AB (opposite of C)
+                        P1 = C + t * (A - C)
+                        P2 = C + t * (B - C)
+                        fig.add_trace(go.Scatter(
+                            x=[P1[0], P2[0]], y=[P1[1], P2[1]],
+                            mode="lines", line=dict(color=color, width=0.7),
+                            hoverinfo="skip", showlegend=False,
+                        ))
+
+                # Cation triangle: Ca (bottom-left), Na+K (bottom-right), Mg (apex)
+                add_triangle_grid((0, 0), (1, 0), (0.5, h))
+                # Anion triangle: HCO3 (bottom-left), Cl (bottom-right), SO4 (apex)
+                add_triangle_grid((OFF, 0), (OFF + 1, 0), (OFF + 0.5, h))
+
+                # Diamond: 4 families of parallel lines (2 pairs).
+                # The diamond has corners (bottom, left, top, right).
+                # Family 1: parallel to the bottom-left edge -> lines from
+                #           bottom->right-edge to left->top-edge at fraction t.
+                # Family 2: parallel to the bottom-right edge -> lines from
+                #           bottom->left-edge to right->top-edge at fraction t.
+                B = np.array([1.5, h])      # bottom
+                L = np.array([1.0, 2*h])    # left
+                T = np.array([1.5, 3*h])    # top
+                R = np.array([2.0, 2*h])    # right
+
+                for t in np.arange(0.2, 1.0 - 1e-9, 0.2):
+                    # Family 1: parallel to B-L
+                    P1 = B + t * (R - B)   # on bottom-right edge
+                    P2 = L + t * (T - L)   # on left-top edge
+                    fig.add_trace(go.Scatter(
+                        x=[P1[0], P2[0]], y=[P1[1], P2[1]],
+                        mode="lines", line=dict(color="#DDD", width=0.7),
+                        hoverinfo="skip", showlegend=False,
+                    ))
+                    # Family 2: parallel to B-R
+                    P1 = B + t * (L - B)   # on bottom-left edge
+                    P2 = R + t * (T - R)   # on right-top edge
+                    fig.add_trace(go.Scatter(
+                        x=[P1[0], P2[0]], y=[P1[1], P2[1]],
+                        mode="lines", line=dict(color="#DDD", width=0.7),
+                        hoverinfo="skip", showlegend=False,
+                    ))
+
+                # --- Hover text ---
                 hover = [
-                    f"Ca={c:.0f}% | Mg={m:.0f}% | Na+K={nk:.0f}%<br>"
-                    f"HCO3={h_:.0f}% | Cl={cl_:.0f}% | SO4={s_:.0f}%"
-                    for c, m, nk, h_, cl_, s_ in zip(
-                        ca_pct, mg_pct, nak_pct, hco3_pct, cl_pct, so4_pct
-                    )
+                    f"Ca={c*100:.0f}% | Mg={m*100:.0f}% | Na+K={nk*100:.0f}%<br>"
+                    f"HCO3={hc*100:.0f}% | Cl={cl_*100:.0f}% | SO4={s*100:.0f}%"
+                    for c, m, nk, hc, cl_, s in zip(ca, mg, nak, hco3, cl, so4)
                 ]
 
-                color_data = None
+                # --- Color data ---
+                color_values = None
                 colorscale = None
                 colorbar = None
                 if color_by != "(none)" and color_by in sample.columns:
                     color_data = sample.loc[meq.index, color_by]
-                    if color_data.dtype.kind in "biufc":
+                    # Use the same robust numeric detection as Tab 2
+                    if _is_truly_numeric(color_data):
+                        color_values = pd.to_numeric(color_data, errors="coerce").values
                         colorscale = "Viridis"
                         colorbar = dict(title=pretty(color_by))
-                        color_values = color_data.values
                     else:
                         # Categorical -> map to integers
-                        cats = color_data.astype("category")
+                        cats = color_data.astype(str).astype("category")
                         color_values = cats.cat.codes.values
-                        colorscale = "Plotly3"
-                        colorbar = dict(title=pretty(color_by),
-                                        tickvals=list(range(len(cats.cat.categories))),
-                                        ticktext=list(cats.cat.categories))
+                        colorscale = "Turbo"
+                        colorbar = dict(
+                            title=pretty(color_by),
+                            tickvals=list(range(len(cats.cat.categories))),
+                            ticktext=list(cats.cat.categories),
+                        )
 
-                def scatter_trace(x, y, name):
+                def scatter_trace(x, y, showcbar=False):
                     return go.Scatter(
-                        x=x, y=y, mode="markers", name=name,
+                        x=x, y=y, mode="markers",
                         text=hover, hovertemplate="%{text}<extra></extra>",
                         marker=dict(
                             size=5,
                             opacity=0.55,
-                            color=color_values if color_data is not None else "#1f77b4",
+                            color=color_values if color_values is not None else "#1f77b4",
                             colorscale=colorscale,
-                            colorbar=colorbar,
+                            colorbar=colorbar if showcbar else None,
+                            showscale=showcbar,
                         ),
                         showlegend=False,
                     )
 
-                fig.add_trace(scatter_trace(cx, cy, "Cations"))
-                fig.add_trace(scatter_trace(ax_, ay_, "Anions"))
-                fig.add_trace(scatter_trace(dx, dy, "Diamond"))
+                fig.add_trace(scatter_trace(cx, cy, showcbar=False))
+                fig.add_trace(scatter_trace(ax_, ay_, showcbar=False))
+                fig.add_trace(scatter_trace(dx, dy, showcbar=(color_values is not None)))
 
-                # Labels
-                fig.add_annotation(x=0, y=-0.05, text="Ca²⁺", showarrow=False, font=dict(size=13))
-                fig.add_annotation(x=1, y=-0.05, text="Na⁺+K⁺", showarrow=False, font=dict(size=13))
-                fig.add_annotation(x=0.5, y=h + 0.03, text="Mg²⁺", showarrow=False, font=dict(size=13))
-
-                fig.add_annotation(x=off, y=-0.05, text="HCO₃⁻", showarrow=False, font=dict(size=13))
-                fig.add_annotation(x=off + 1, y=-0.05, text="Cl⁻", showarrow=False, font=dict(size=13))
-                fig.add_annotation(x=off + 0.5, y=h + 0.03, text="SO₄²⁻", showarrow=False, font=dict(size=13))
+                # --- Corner labels ---
+                lbl = dict(size=14, color="#222")
+                # Cation triangle
+                fig.add_annotation(x=0,    y=-0.06, text="<b>Ca²⁺</b>",   showarrow=False, font=lbl)
+                fig.add_annotation(x=1,    y=-0.06, text="<b>Na⁺+K⁺</b>", showarrow=False, font=lbl)
+                fig.add_annotation(x=0.5,  y=h + 0.06, text="<b>Mg²⁺</b>",showarrow=False, font=lbl)
+                # Anion triangle
+                fig.add_annotation(x=OFF,      y=-0.06, text="<b>HCO₃⁻</b>", showarrow=False, font=lbl)
+                fig.add_annotation(x=OFF + 1,  y=-0.06, text="<b>Cl⁻</b>",   showarrow=False, font=lbl)
+                fig.add_annotation(x=OFF+0.5,  y=h + 0.06, text="<b>SO₄²⁻</b>", showarrow=False, font=lbl)
+                # Diamond corners
+                fig.add_annotation(x=1.0 - 0.05, y=2*h, text="<b>Ca+Mg</b>",     showarrow=False, font=lbl, xanchor="right")
+                fig.add_annotation(x=2.0 + 0.05, y=2*h, text="<b>Na+K+Cl+SO₄</b>", showarrow=False, font=lbl, xanchor="left")
+                fig.add_annotation(x=1.5, y=3*h + 0.06, text="<b>SO₄+Cl</b>",   showarrow=False, font=lbl)
+                fig.add_annotation(x=1.5, y=h - 0.06, text="<b>Ca+HCO₃</b>",    showarrow=False, font=lbl)
 
                 fig.update_layout(
                     title=f"Piper diagram — N = {len(meq):,}",
-                    xaxis=dict(visible=False, range=[-0.15, off + 1.15], scaleanchor="y", scaleratio=1),
-                    yaxis=dict(visible=False, range=[-0.15, 2.2]),
-                    height=700, showlegend=False,
+                    xaxis=dict(visible=False, range=[-0.25, OFF + 1.25],
+                               scaleanchor="y", scaleratio=1),
+                    yaxis=dict(visible=False, range=[-0.15, 3*h + 0.25]),
+                    height=750, showlegend=False,
                     plot_bgcolor="white",
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -971,7 +1078,8 @@ with tab_piper:
                 st.caption(
                     "Left triangle: cation facies (Ca, Mg, Na+K). "
                     "Right triangle: anion facies (HCO₃, Cl, SO₄). "
-                    "Upper diamond: projection of both in the hydrochemical type space."
+                    "Upper diamond: combined hydrochemical facies. "
+                    "Each point is plotted three times (once in each sub-plot)."
                 )
 
 
