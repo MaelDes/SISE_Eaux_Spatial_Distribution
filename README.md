@@ -176,8 +176,8 @@ foreach ($y in $years) {
 | Keyword | Description |
 |---|---|
 | `CALCIUM` | Calcium (mg/L) |
-| `MAGNÉSIUM` | Magnesium (mg/L) |
-| `HYDROGÉNOCARBONATES` | Bicarbonates (mg/L) |
+| `MAGNESIUM` | Magnesium (mg/L) |
+| `HYDROGENOCARBONATES` | Bicarbonates (mg/L) |
 | `SULFATES` | Sulfates (mg/L) |
 | `CHLORURES` | Chlorides (mg/L) |
 | `NITRATES (EN NO3)` | Nitrates (mg/L) |
@@ -204,7 +204,7 @@ Full list:
 **Batch all maps at once (PowerShell loop):**
 
 ```powershell
-$params = @("CALCIUM", "MAGNÉSIUM", "HYDROGÉNOCARBONATES", "SULFATES", "PH ",
+$params = @("CALCIUM", "MAGNESIUM", "HYDROGENOCARBONATES", "SULFATES", "PH ",
             "IL", "ryznar", "Larson", "Bason")
 
 foreach ($p in $params) {
