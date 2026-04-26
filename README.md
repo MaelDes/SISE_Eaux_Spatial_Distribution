@@ -381,12 +381,12 @@ Outlier values are replaced with NaN; rows are preserved so that other columns r
 
 | Tab | Purpose |
 |---|---|
-| **📊 Correlation matrix** | Heatmap with Pearson / Spearman / Kendall, optional hierarchical clustering of variables, CSV download |
-| **🎨 Scatter + color** | X vs Y scatter colored by a 3rd variable (numeric or categorical), with optional marginal histograms, log axes |
-| **📈 Regression** | X vs Y scatter with OLS regression line, R², slope, intercept, p-value, and both Pearson & Spearman correlations displayed |
-| **🔍 Distributions** | Build a filter (1–2 conditions) and compare histograms of the filtered subset against the full dataset, with Mann-Whitney U test |
-| **🧪 Piper diagram** | Hydrochemical facies (Piper 1944) built from Ca, Mg, Na+K, HCO₃, Cl, SO₄ converted to meq/L, with optional coloring by a 4th variable |
-| **🧊 3D scatter** | X/Y/Z 3D scatter with optional quadratic response surface fitting (`Z = a + bX + cY + dX² + eY² + fXY`) |
+| **Correlation matrix** | Heatmap with Pearson / Spearman / Kendall, optional hierarchical clustering of variables, CSV download |
+| **Scatter + color** | X vs Y scatter colored by a 3rd variable (numeric or categorical), with optional marginal histograms, log axes |
+| **Regression** | X vs Y scatter with OLS regression line, R², slope, intercept, p-value, and both Pearson & Spearman correlations displayed |
+| **Distributions** | Build a filter (1–2 conditions) and compare histograms of the filtered subset against the full dataset, with Mann-Whitney U test |
+| **Piper diagram** | Hydrochemical facies (Piper 1944) built from Ca, Mg, Na+K, HCO₃, Cl, SO₄ converted to meq/L, with optional coloring by a 4th variable |
+| **3D scatter** | X/Y/Z 3D scatter with optional quadratic response surface fitting (`Z = a + bX + cY + dX² + eY² + fXY`) |
 
 ### 6.5 Reproducing Article Figures
 
@@ -434,7 +434,7 @@ Make sure you use `LITHO_SIMP` as the field (`--geology-field LITHO_SIMP`) **and
 
 ### How many years can I combine?
 
-As many as you want — CSVs are simply concatenated. Adjust figure legends accordingly.
+As many as you want, CSVs are simply concatenated. Adjust figure legends accordingly.
 
 ### Testing a parameter not in the default list
 
@@ -464,7 +464,7 @@ Activate the **IQR outlier filter** in the sidebar (default is 3.0). It masks ab
 
 ---
 
-## 9. Methodology (paper-ready)
+## 9. Methodology 
 
 **Why non-parametric tests:**
 - Water-chemistry distributions are strongly skewed with heavy tails (rare geogenic/anthropogenic extremes)
