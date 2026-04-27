@@ -11,9 +11,10 @@ __pycache__/
 .Python
 *.egg-info/
 
-# Data — too large for Git, hosted in GitHub Releases or kept locally
+# Data — too large for Git, hosted in GitHub Releases
 communes.geojson
 communes_simplified.geojson
+classified_annual_data.csv
 *.shp
 *.shx
 *.dbf
@@ -23,10 +24,8 @@ sise_brut/
 csv_traite/
 .cache/
 
-# Stats output — most are regeneratable, but we KEEP the aggregated CSV
-# in the repo so the deployed app has data to display.
-stats/*
-!stats/classified_annual_data.csv
+# Stats output — regeneratable, kept locally only
+stats/
 
 # Output — regeneratable
 cartes/
