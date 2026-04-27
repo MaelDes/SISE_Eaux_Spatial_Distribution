@@ -15,9 +15,7 @@ Python tools to process the French **SISE-Eaux** database (sanitary control of d
 
 ## Live demo
 
-The app can be deployed on [Streamlit Community Cloud](https://share.streamlit.io) for free — see §7 below.
-
-The deployed app downloads its data automatically from this repo's GitHub Releases on first launch (~30 s) and serves a fully-featured interactive interface to anyone with the link.
+The app is deployed here : https://maeldes-sise-eaux-spatial-distribution-sise-explorer-5teaoj.streamlit.app/
 
 ---
 
