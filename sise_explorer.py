@@ -38,6 +38,51 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from scipy import stats
+import plotly.io as pio
+
+
+# ---------------------------------------------------------------------------
+# Plotly theme
+# ---------------------------------------------------------------------------
+
+pio.templates["sise"] = pio.templates["plotly_dark"]
+pio.templates["sise"].layout.update(
+    font=dict(family="Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+              color="#e4e4e7", size=12),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(255,255,255,0.015)",
+    colorway=["#a78bfa", "#22d3ee", "#34d399", "#fbbf24", "#f87171", "#f472b6"],
+    title=dict(font=dict(size=14, color="#fafafa", family="Inter"),
+               x=0.0, xanchor="left"),
+    xaxis=dict(
+        gridcolor="rgba(255,255,255,0.04)",
+        zerolinecolor="rgba(255,255,255,0.08)",
+        linecolor="rgba(255,255,255,0.08)",
+        tickcolor="rgba(255,255,255,0.2)",
+        tickfont=dict(color="#a1a1aa", size=11),
+    ),
+    yaxis=dict(
+        gridcolor="rgba(255,255,255,0.04)",
+        zerolinecolor="rgba(255,255,255,0.08)",
+        linecolor="rgba(255,255,255,0.08)",
+        tickcolor="rgba(255,255,255,0.2)",
+        tickfont=dict(color="#a1a1aa", size=11),
+    ),
+    legend=dict(
+        bgcolor="rgba(24,24,27,0.7)",
+        bordercolor="rgba(255,255,255,0.06)",
+        borderwidth=1,
+        font=dict(color="#d4d4d8", size=11),
+    ),
+    colorscale=dict(sequential="Viridis"),
+    margin=dict(l=50, r=30, t=60, b=50),
+    hoverlabel=dict(
+        bgcolor="rgba(24,24,27,0.95)",
+        bordercolor="rgba(167,139,250,0.4)",
+        font=dict(color="#fafafa", family="Inter", size=12),
+    ),
+)
+pio.templates.default = "sise"
 
 
 # ---------------------------------------------------------------------------
@@ -45,11 +90,429 @@ from scipy import stats
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="SISE-Eaux Explorer",
-    page_icon="💧",
+    page_title="SISE Explorer",
+    page_icon="◆",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ---------------------------------------------------------------------------
+# Premium UI styling
+# ---------------------------------------------------------------------------
+
+_PREMIUM_CSS = """
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* SISE Explorer - Premium UI */
+
+/* ── Color tokens ── */
+:root {
+    --bg-base:       #09090b;
+    --bg-elevated:   #18181b;
+    --bg-hover:      #27272a;
+    --bg-card:       rgba(24, 24, 27, 0.6);
+    --border:        rgba(255, 255, 255, 0.06);
+    --border-hover:  rgba(255, 255, 255, 0.12);
+    --text-primary:  #fafafa;
+    --text-secondary:#a1a1aa;
+    --text-tertiary: #71717a;
+    --accent:        #a78bfa;
+    --accent-glow:   rgba(167, 139, 250, 0.15);
+    --accent-cyan:   #22d3ee;
+    --accent-green:  #34d399;
+}
+
+/* ── Base ── */
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: var(--text-primary);
+    letter-spacing: -0.005em;
+}
+
+code, pre, .stCodeBlock, [data-testid="stCode"] {
+    font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+    font-size: 12px !important;
+}
+
+/* ── App background — subtle gradient ── */
+.stApp {
+    background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(167, 139, 250, 0.06), transparent 60%),
+        radial-gradient(800px 400px at 0% 20%, rgba(34, 211, 238, 0.04), transparent 50%),
+        var(--bg-base);
+    background-attachment: fixed;
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background: rgba(9, 9, 11, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-right: 1px solid var(--border);
+}
+[data-testid="stSidebar"] > div { padding-top: 1.5rem; }
+[data-testid="stSidebar"] h1 {
+    font-size: 1.1rem !important;
+    font-weight: 700 !important;
+    color: var(--text-primary) !important;
+    letter-spacing: -0.02em !important;
+    margin-bottom: 0.25rem !important;
+    border: none !important;
+    padding: 0 !important;
+    background: linear-gradient(135deg, #fafafa 0%, #a1a1aa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+    font-size: 0.7rem !important;
+    font-weight: 600 !important;
+    color: var(--text-tertiary) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.1em !important;
+    margin-top: 1.5rem !important;
+    margin-bottom: 0.75rem !important;
+}
+[data-testid="stSidebar"] .stMarkdown p {
+    color: var(--text-secondary) !important;
+    font-size: 12px !important;
+    line-height: 1.6;
+}
+[data-testid="stSidebar"] label {
+    color: var(--text-secondary) !important;
+    font-size: 11px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+}
+[data-testid="stSidebar"] .stRadio label {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-primary) !important;
+}
+
+/* ── Main content ── */
+.main .block-container {
+    padding-top: 2.5rem;
+    padding-bottom: 3rem;
+    max-width: 1500px;
+}
+
+/* ── Headings ── */
+h1 {
+    font-size: 1.875rem !important;
+    font-weight: 700 !important;
+    color: var(--text-primary) !important;
+    letter-spacing: -0.03em !important;
+    margin-bottom: 0.5rem !important;
+    border: none !important;
+    padding: 0 !important;
+    background: linear-gradient(135deg, #fafafa 0%, #d4d4d8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+h2 {
+    font-size: 1.25rem !important;
+    font-weight: 600 !important;
+    color: var(--text-primary) !important;
+    letter-spacing: -0.02em !important;
+    margin-top: 1.5rem !important;
+}
+h3 {
+    font-size: 1.05rem !important;
+    font-weight: 600 !important;
+    color: var(--text-primary) !important;
+    letter-spacing: -0.015em !important;
+}
+
+/* ── Tabs — elegant pill style ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: var(--bg-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 1.5rem;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 7px;
+    transition: all 0.15s ease;
+    letter-spacing: -0.01em;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.03);
+}
+.stTabs [aria-selected="true"] {
+    color: var(--text-primary) !important;
+    background: rgba(255,255,255,0.06) !important;
+    border: none !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.04);
+}
+.stTabs [data-baseweb="tab-panel"] {
+    padding-top: 0.5rem;
+}
+
+/* ── Metrics — premium cards ── */
+[data-testid="stMetric"] {
+    background: var(--bg-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+[data-testid="stMetric"]:hover {
+    border-color: var(--border-hover);
+    transform: translateY(-1px);
+}
+[data-testid="stMetricLabel"] {
+    color: var(--text-tertiary) !important;
+    font-size: 10px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+}
+[data-testid="stMetricValue"] {
+    color: var(--text-primary) !important;
+    font-size: 1.6rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.02em;
+    font-family: 'Inter', sans-serif;
+}
+[data-testid="stMetricDelta"] { font-size: 11px !important; }
+
+/* ── Buttons ── */
+.stButton > button {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    letter-spacing: -0.01em;
+    transition: all 0.15s ease;
+}
+.stButton > button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--border-hover);
+    transform: translateY(-1px);
+}
+.stButton > button:active { transform: translateY(0); }
+
+/* ── Inputs ── */
+.stTextInput input, .stNumberInput input {
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    padding: 0.5rem 0.75rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.stTextInput input:focus, .stNumberInput input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+    outline: none;
+}
+
+/* ── Select ── */
+.stSelectbox [data-baseweb="select"] > div {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 13px;
+    transition: border-color 0.15s ease;
+}
+.stSelectbox [data-baseweb="select"] > div:hover { border-color: var(--border-hover); }
+[data-baseweb="popover"] {
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4) !important;
+}
+
+/* ── Multiselect tags ── */
+.stMultiSelect [data-baseweb="select"] > div {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+[data-baseweb="tag"] {
+    background: var(--accent-glow) !important;
+    border: 1px solid rgba(167, 139, 250, 0.3) !important;
+    border-radius: 5px !important;
+}
+[data-baseweb="tag"] span { color: var(--accent) !important; font-size: 11px; font-weight: 500; }
+
+/* ── Slider ── */
+.stSlider [data-baseweb="slider"] [role="slider"] {
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-glow);
+    border: none;
+}
+.stSlider [data-baseweb="slider"] > div > div { background: var(--accent) !important; }
+
+/* ── Checkbox ── */
+.stCheckbox label { color: var(--text-primary) !important; font-size: 13px; }
+.stCheckbox label > div:first-child {
+    border: 1.5px solid var(--border-hover) !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+    border-radius: 4px !important;
+}
+
+/* ── Alerts ── */
+.stAlert, [data-testid="stNotification"] {
+    background: var(--bg-card) !important;
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    font-size: 13px;
+}
+[data-baseweb="notification"][kind="info"] {
+    border-left: 3px solid var(--accent-cyan) !important;
+}
+[data-baseweb="notification"][kind="success"] {
+    border-left: 3px solid var(--accent-green) !important;
+}
+[data-baseweb="notification"][kind="warning"] {
+    border-left: 3px solid #fbbf24 !important;
+}
+[data-baseweb="notification"][kind="error"] {
+    border-left: 3px solid #f87171 !important;
+}
+
+/* ── Dataframe ── */
+.stDataFrame {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+
+/* ── Expander ── */
+.streamlit-expanderHeader {
+    background: var(--bg-card) !important;
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    color: var(--text-secondary) !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    transition: border-color 0.15s ease;
+}
+.streamlit-expanderHeader:hover {
+    border-color: var(--border-hover) !important;
+}
+.streamlit-expanderContent {
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+}
+
+/* ── Caption ── */
+.stCaption, [data-testid="stCaptionContainer"] {
+    color: var(--text-tertiary) !important;
+    font-size: 12px !important;
+    letter-spacing: -0.005em;
+}
+
+/* ── File uploader ── */
+[data-testid="stFileUploader"] {
+    background: var(--bg-card);
+    backdrop-filter: blur(12px);
+    border: 1px dashed var(--border-hover);
+    border-radius: 10px;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+[data-testid="stFileUploader"]:hover {
+    border-color: var(--accent);
+    background: rgba(167, 139, 250, 0.03);
+}
+
+/* ── Download button — accent style ── */
+.stDownloadButton > button {
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0.5rem 1rem;
+    box-shadow: 0 1px 3px rgba(167, 139, 250, 0.3);
+    transition: all 0.15s ease;
+}
+.stDownloadButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(167, 139, 250, 0.4);
+}
+
+/* ── Plotly chart container ── */
+[data-testid="stPlotlyChart"] {
+    background: var(--bg-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem;
+    transition: border-color 0.15s ease;
+}
+[data-testid="stPlotlyChart"]:hover {
+    border-color: var(--border-hover);
+}
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--border-hover);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+/* ── Hide Streamlit branding ── */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+[data-testid="stHeader"] { background: transparent; }
+[data-testid="stToolbar"] { background: transparent; }
+
+/* ── Subtle fade-in animation for plot containers ── */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+[data-testid="stPlotlyChart"],
+[data-testid="stMetric"] {
+    animation: fadeUp 0.4s ease-out;
+}
+</style>
+"""
+
+# Inject CSS. We use st.html() if available (Streamlit 1.33+) since it
+# bypasses markdown processing and prevents stray characters from leaking
+# into the visible page. Fall back to st.markdown otherwise.
+try:
+    st.html(_PREMIUM_CSS)
+except AttributeError:
+    st.markdown(_PREMIUM_CSS, unsafe_allow_html=True)
 
 # Default candidate files in the project root
 DEFAULT_CLASSIFIED = "stats/classified_annual_data.csv"
@@ -171,10 +634,24 @@ def categorical_columns(df: pd.DataFrame) -> list[str]:
 # Sidebar : data source selection
 # ---------------------------------------------------------------------------
 
-st.sidebar.title("💧 SISE-Eaux Explorer")
-st.sidebar.markdown("Correlation & distribution analysis of French drinking-water chemistry.")
+st.sidebar.markdown("""
+<div style='padding: 0 0 1.5rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 1.25rem;'>
+    <div style='display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem;'>
+        <div style='width: 28px; height: 28px; border-radius: 7px;
+                    background: linear-gradient(135deg, #a78bfa, #22d3ee);
+                    display: flex; align-items: center; justify-content: center;
+                    box-shadow: 0 4px 12px rgba(167, 139, 250, 0.25);
+                    font-size: 14px; font-weight: 700; color: white;'>S</div>
+        <div style='font-size: 1rem; font-weight: 700; color: #fafafa;
+                    letter-spacing: -0.02em;'>SISE Explorer</div>
+    </div>
+    <div style='font-size: 11px; color: #71717a; line-height: 1.5; padding-left: 0.1rem;'>
+        Drinking-water chemistry analysis
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-st.sidebar.header("1. Data source")
+st.sidebar.header("Data source")
 
 source = st.sidebar.radio(
     "Data source",
@@ -219,11 +696,33 @@ else:  # Upload
         status_msg = f"Loaded {len(df):,} rows from upload"
 
 if df is None:
-    st.title("💧 SISE-Eaux Correlation Explorer")
+    st.markdown("""
+    <div style='padding: 4rem 0 2rem 0; text-align: center;'>
+        <div style='display: inline-flex; align-items: center; gap: 0.75rem; padding: 0.5rem 1rem;
+                    background: rgba(167, 139, 250, 0.08); border: 1px solid rgba(167, 139, 250, 0.2);
+                    border-radius: 100px; font-size: 12px; color: #a78bfa; font-weight: 500;
+                    margin-bottom: 1.5rem; letter-spacing: 0.02em;'>
+            <span style='width: 6px; height: 6px; background: #a78bfa; border-radius: 50%;
+                        box-shadow: 0 0 8px #a78bfa;'></span>
+            INTERACTIVE DATA EXPLORER
+        </div>
+        <h1 style='font-size: 3rem !important; margin-bottom: 0.75rem !important;
+                   background: linear-gradient(135deg, #fafafa 0%, #a1a1aa 100%);
+                   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                   font-weight: 800 !important; letter-spacing: -0.04em !important;'>
+            SISE-Eaux Explorer
+        </h1>
+        <p style='color: #a1a1aa; font-size: 1.05rem; max-width: 600px; margin: 0 auto 2.5rem auto;
+                  line-height: 1.6;'>
+            Statistical exploration of French drinking-water chemistry —
+            correlations, regressions, hydrochemical facies and response surfaces.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     st.info(
-        "👈 **Select a data source in the sidebar to start.**\n\n"
+        "**Select a data source in the sidebar to begin.**  \n"
         "Recommended: point to `stats/classified_annual_data.csv` produced by "
-        "`sise_stats.py run`. It already contains geological zones and index grades."
+        "`sise_stats.py run` — it already contains geological zones and index grades."
     )
     st.stop()
 
@@ -235,7 +734,7 @@ st.sidebar.caption(f"Rows: **{len(df):,}** — Cols: **{len(df.columns)}**")
 # Sidebar : optional filters
 # ---------------------------------------------------------------------------
 
-st.sidebar.header("2. Filters (optional)")
+st.sidebar.header("Filters")
 
 num_cols = numeric_columns(df)
 cat_cols = categorical_columns(df)
@@ -319,24 +818,34 @@ st.sidebar.caption(f"After filters: **{len(df):,}** rows")
 # Header
 # ---------------------------------------------------------------------------
 
-st.title("💧 SISE-Eaux Correlation Explorer")
-st.caption(
-    "Exploratory analysis of French drinking-water chemistry "
-    "(commune × year aggregated data)."
-)
+st.markdown(f"""
+<div style='margin-bottom: 1.5rem;'>
+    <div style='font-size: 11px; color: #a78bfa; font-weight: 600; letter-spacing: 0.12em;
+                text-transform: uppercase; margin-bottom: 0.5rem;'>
+        Exploratory analytics
+    </div>
+    <h1>SISE-Eaux Explorer</h1>
+    <p style='color: #a1a1aa; font-size: 0.95rem; margin: 0; line-height: 1.5;'>
+        French drinking-water chemistry · commune × year aggregated dataset ·
+        <span style='color: #fafafa; font-weight: 500;'>{len(df):,}</span> observations ·
+        <span style='color: #fafafa; font-weight: 500;'>{len(df.columns)}</span> variables
+    </p>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab_corr, tab_scatter_c, tab_reg, tab_dist, tab_piper, tab_3d = st.tabs([
-    "📊 Correlation matrix",
-    "🎨 Scatter + color",
-    "📈 Regression",
-    "🔍 Distributions",
-    "🧪 Piper diagram",
-    "🧊 3D response surface",
+tab_corr, tab_scatter_c, tab_reg, tab_dist, tab_piper, tab_3d, tab_map = st.tabs([
+    "Correlation",
+    "Scatter",
+    "Regression",
+    "Distributions",
+    "Piper diagram",
+    "3D surface",
+    "Maps",
 ])
 
 
@@ -505,7 +1014,7 @@ with tab_scatter_c:
             fig.add_trace(
                 go.Histogram(
                     x=plot_df[x_col], nbinsx=40,
-                    marker_color="#888", showlegend=False,
+                    marker_color="rgba(167, 139, 250, 0.5)", showlegend=False,
                     hoverinfo="skip",
                 ),
                 row=1, col=1,
@@ -514,7 +1023,7 @@ with tab_scatter_c:
             fig.add_trace(
                 go.Histogram(
                     y=plot_df[y_col], nbinsy=40,
-                    marker_color="#888", showlegend=False,
+                    marker_color="rgba(167, 139, 250, 0.5)", showlegend=False,
                     hoverinfo="skip",
                 ),
                 row=2, col=2,
@@ -907,7 +1416,7 @@ with tab_piper:
                 fig = go.Figure()
 
                 # --- Triangle outlines ---
-                tri_color = "#333"
+                tri_color = "rgba(255,255,255,0.18)"
                 # Cation triangle
                 fig.add_trace(go.Scatter(
                     x=[0, 1, 0.5, 0], y=[0, 0, h, 0],
@@ -938,7 +1447,7 @@ with tab_piper:
                 # Principle: for a triangle ABC, a line parallel to side BC at
                 # proportion t (0=A, 1=BC) goes from A+t*(B-A) to A+t*(C-A).
 
-                def add_triangle_grid(A, B, C, step=0.2, color="#DDD"):
+                def add_triangle_grid(A, B, C, step=0.2, color="rgba(255,255,255,0.06)"):
                     """Draw the 3 families of parallel gridlines inside a triangle."""
                     A, B, C = np.array(A), np.array(B), np.array(C)
                     for t in np.arange(step, 1.0 - 1e-9, step):
@@ -989,7 +1498,7 @@ with tab_piper:
                     P2 = L + t * (T - L)   # on left-top edge
                     fig.add_trace(go.Scatter(
                         x=[P1[0], P2[0]], y=[P1[1], P2[1]],
-                        mode="lines", line=dict(color="#DDD", width=0.7),
+                        mode="lines", line=dict(color="rgba(255,255,255,0.06)", width=0.7),
                         hoverinfo="skip", showlegend=False,
                     ))
                     # Family 2: parallel to B-R
@@ -997,7 +1506,7 @@ with tab_piper:
                     P2 = R + t * (T - R)   # on right-top edge
                     fig.add_trace(go.Scatter(
                         x=[P1[0], P2[0]], y=[P1[1], P2[1]],
-                        mode="lines", line=dict(color="#DDD", width=0.7),
+                        mode="lines", line=dict(color="rgba(255,255,255,0.06)", width=0.7),
                         hoverinfo="skip", showlegend=False,
                     ))
 
@@ -1050,7 +1559,7 @@ with tab_piper:
                 fig.add_trace(scatter_trace(dx, dy, showcbar=(color_values is not None)))
 
                 # --- Corner labels ---
-                lbl = dict(size=14, color="#222")
+                lbl = dict(size=14, color="#fafafa")
                 # Cation triangle
                 fig.add_annotation(x=0,    y=-0.06, text="<b>Ca²⁺</b>",   showarrow=False, font=lbl)
                 fig.add_annotation(x=1,    y=-0.06, text="<b>Na⁺+K⁺</b>", showarrow=False, font=lbl)
@@ -1071,7 +1580,7 @@ with tab_piper:
                                scaleanchor="y", scaleratio=1),
                     yaxis=dict(visible=False, range=[-0.15, 3*h + 0.25]),
                     height=750, showlegend=False,
-                    plot_bgcolor="white",
+                    plot_bgcolor="rgba(0,0,0,0)",
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -1178,3 +1687,514 @@ with tab_3d:
                                          opacity=0.35, showscale=False,
                                          colorscale="Greys", name="Fit"))
                 st.plotly_chart(fig, use_container_width=True)
+
+
+# ============================================================================
+# Tab 7 : Maps (choropleth on French communes)
+# ============================================================================
+
+# Default candidate path for the communes GeoJSON in the project root
+DEFAULT_GEOJSON = "communes.geojson"
+
+
+@st.cache_resource(show_spinner=False)
+def _load_geojson(path: str) -> dict | None:
+    """
+    Load the communes GeoJSON ONCE per session. We use cache_resource (not
+    cache_data) so the dict is kept in memory across reruns and not
+    re-serialized to the browser at every interaction.
+    """
+    import json
+    p = Path(path)
+    if not p.exists():
+        return None
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
+
+
+@st.cache_resource(show_spinner=False)
+def _precompute_centroids(path: str, _version: int = 3) -> pd.DataFrame | None:
+    """
+    Compute commune centroids once per session.
+    Returns a small DataFrame (~35k rows × 4 cols, ~1 MB) instead of the
+    heavy GeoJSON (10-30 MB) — used by the fast "points" rendering path.
+
+    Auto-detects the INSEE code field by inspecting the first feature.
+
+    The `_version` argument is used to invalidate the Streamlit cache when
+    the function logic changes — bump it whenever you change this code.
+    """
+    import json, re
+    p = Path(path)
+    if not p.exists():
+        return None
+
+    with open(p, encoding="utf-8") as f:
+        geojson = json.load(f)
+
+    features = geojson.get("features", [])
+    if not features:
+        return None
+
+    # --- Auto-detect the INSEE code field across the first 50 features ---
+    pattern = re.compile(r"^[\dA-Za-z]{5}$")
+    candidate_keys = {}
+    for feat in features[:50]:
+        props = feat.get("properties") or {}
+        for k, v in props.items():
+            if v is None:
+                continue
+            if pattern.match(str(v).strip()):
+                candidate_keys[k] = candidate_keys.get(k, 0) + 1
+    # Prefer keys whose name suggests an INSEE code, then by frequency
+    def _key_score(k):
+        name_bonus = 100 if re.search(r"code|insee|geo", k, re.I) else 0
+        return name_bonus + candidate_keys[k]
+    insee_key = max(candidate_keys, key=_key_score) if candidate_keys else None
+
+    # Find a "name" field
+    first_props = features[0].get("properties") or {}
+    name_key = None
+    for k in ("nom", "NOM_COM", "name", "libelle", "nom_com"):
+        if k in first_props:
+            name_key = k
+            break
+
+    # Fallback: top-level id
+    use_top_id = (insee_key is None) and any(f.get("id") for f in features[:5])
+
+    rows = []
+    for feat in features:
+        props = feat.get("properties") or {}
+        if insee_key:
+            code = props.get(insee_key)
+        elif use_top_id:
+            code = feat.get("id")
+        else:
+            code = None
+        if code is None:
+            continue
+
+        geom = feat.get("geometry") or {}
+        coords = geom.get("coordinates")
+        if not coords:
+            continue
+        gtype = geom.get("type")
+        # Extract a list of (lon, lat) pairs from the geometry
+        if gtype == "Polygon":
+            # coords = [outer_ring, hole1, hole2, ...] — take outer ring
+            pts = coords[0] if coords else None
+        elif gtype == "MultiPolygon":
+            # coords = [poly1, poly2, ...], each poly = [outer_ring, ...]
+            try:
+                largest = max(coords, key=lambda poly: len(poly[0]) if poly and poly[0] else 0)
+                pts = largest[0] if largest else None
+            except (TypeError, IndexError):
+                pts = None
+        else:
+            continue
+        if not pts:
+            continue
+        try:
+            arr = np.asarray(pts, dtype=float)
+            if arr.ndim != 2 or arr.shape[1] < 2:
+                continue
+            lon, lat = float(arr[:, 0].mean()), float(arr[:, 1].mean())
+        except Exception:
+            continue
+        name = (props.get(name_key) if name_key else "") or ""
+        rows.append((str(code).strip().zfill(5), name, lon, lat))
+
+    if not rows:
+        return None
+    return pd.DataFrame(rows, columns=["code", "name", "lon", "lat"])
+
+
+@st.cache_data(show_spinner=False)
+def _param_config() -> dict:
+    """
+    Return colorscale config per parameter.
+    We try to import the canonical PARAM_CONFIG from sise_pipeline.
+    If that fails (e.g. running standalone), we use a sensible default.
+    """
+    try:
+        from sise_pipeline import PARAM_CONFIG
+        return PARAM_CONFIG
+    except Exception:
+        return {
+            "PH ":                 {"label": "pH",                 "cmin": 5,    "cmax": 10},
+            "CALCIUM":             {"label": "Calcium (mg/L)",     "cmin": 0,    "cmax": 150},
+            "MAGNESIUM":           {"label": "Magnesium (mg/L)",   "cmin": 0,    "cmax": 60},
+            "MAGNÉSIUM":           {"label": "Magnesium (mg/L)",   "cmin": 0,    "cmax": 60},
+            "HYDROGENOCARBONATES": {"label": "HCO3 (mg/L)",        "cmin": 0,    "cmax": 500},
+            "HYDROGÉNOCARBONATES": {"label": "HCO3 (mg/L)",        "cmin": 0,    "cmax": 500},
+            "SULFATES":            {"label": "Sulfates (mg/L)",    "cmin": 0,    "cmax": 80},
+            "CHLORURES":           {"label": "Chlorides (mg/L)",   "cmin": 0,    "cmax": 100},
+            "NITRATES (EN NO3)":   {"label": "Nitrates (mg/L)",    "cmin": 0,    "cmax": 60},
+            "IL":                  {"label": "Langelier SI",       "cmin": -3,   "cmax": 2},
+            "IL_calc":             {"label": "Langelier SI (calc)","cmin": -3,   "cmax": 2},
+            "ryznar":              {"label": "Ryznar SI",          "cmin": 5,    "cmax": 13},
+            "Bason":               {"label": "Basson Index",       "cmin": -200, "cmax": 1200},
+            "Larson":              {"label": "Larson-Skold",       "cmin": 0,    "cmax": 3},
+        }
+
+
+def _is_index_param(param: str) -> bool:
+    """Indices use a diverging colorscale (centered on equilibrium value)."""
+    return param in {"IL", "IL_calc", "ryznar", "Larson", "Bason"}
+
+
+def _index_zero(param: str) -> float | None:
+    """Equilibrium value for diverging colorscales."""
+    return {
+        "IL": 0.0, "IL_calc": 0.0,
+        "ryznar": 6.5,    # midpoint of the balanced zone (6.2–6.8)
+        "Larson": 0.5,    # threshold low/moderate corrosion
+        "Bason": 300.0,   # threshold balanced/moderate corrosion
+    }.get(param)
+
+
+@st.cache_data(show_spinner=False)
+def _aggregate_for_map(
+    df_pickle_key: str,
+    df: pd.DataFrame,
+    param: str,
+    year: int | None,
+    code_col: str,
+) -> pd.DataFrame:
+    """
+    Aggregate the dataframe to (commune, mean_value, n_measures) for one
+    parameter and optionally one year. The first arg is a pickle-key just to
+    let Streamlit invalidate the cache when df changes.
+    """
+    work = df[[code_col, param]].copy()
+    if year is not None and "Year" in df.columns:
+        work = work.assign(Year=df["Year"])
+        work = work[work["Year"] == year]
+        work = work.drop(columns=["Year"])
+    work = work.dropna(subset=[param])
+    if work.empty:
+        return work
+
+    grouped = (
+        work.groupby(code_col, as_index=False)
+            .agg(value=(param, "mean"), n=(param, "size"))
+    )
+    grouped = grouped.rename(columns={code_col: "code"})
+    # Pad INSEE codes to 5 chars to match GeoJSON (e.g. 1001 -> "01001")
+    grouped["code"] = grouped["code"].astype(str).str.zfill(5)
+    return grouped
+
+
+with tab_map:
+    st.markdown("""
+    <div style='margin-bottom: 1rem;'>
+      <div style='font-size: 11px; color: #a78bfa; font-weight: 600; letter-spacing: 0.12em;
+                  text-transform: uppercase; margin-bottom: 0.4rem;'>
+        Geographic visualisation
+      </div>
+      <h2 style='margin-top: 0 !important;'>Interactive choropleth map</h2>
+      <p style='color: #a1a1aa; font-size: 13px; margin: 0.25rem 0 0 0;'>
+        Mean value per commune for the selected parameter and year.
+        Built directly from the loaded dataset — no pre-computation needed.
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    geojson_path = st.text_input(
+        "Communes GeoJSON path",
+        DEFAULT_GEOJSON,
+        help="Path to the GeoJSON of French communes (download once from "
+             "https://github.com/gregoiredavid/france-geojson).",
+        key="map_geojson_path",
+    )
+    geojson = _load_geojson(geojson_path)
+    centroids = _precompute_centroids(geojson_path)
+
+    if geojson is None:
+        st.warning(
+            f"GeoJSON not found at `{geojson_path}`. "
+            "Download the communes GeoJSON and put it in the project root."
+        )
+    elif centroids is None or len(centroids) == 0:
+        # Show a debug panel so the user can see what went wrong
+        st.error(
+            "Could not extract commune centroids from the GeoJSON. "
+            "The Fast (points) mode requires this — switch to Detailed (polygons) for now."
+        )
+        with st.expander("Debug — GeoJSON structure"):
+            sample = geojson["features"][0] if geojson.get("features") else {}
+            st.write("**First feature properties keys:**")
+            st.code(list((sample.get("properties") or {}).keys()))
+            st.write("**First feature properties (first 10):**")
+            st.code({k: v for k, v in (sample.get("properties") or {}).items()
+                     if k in list((sample.get("properties") or {}).keys())[:10]})
+            st.write("**Geometry type:**", sample.get("geometry", {}).get("type"))
+            st.write("**Top-level `id` field:**", sample.get("id", "(none)"))
+            st.info(
+                "Send me the keys above and I will adapt the centroid extraction "
+                "to your specific GeoJSON format."
+            )
+    else:
+        # Identify INSEE code column in the dataframe
+        code_col = next(
+            (c for c in ("inseecommuneprinc", "code_insee", "INSEE_COM", "code")
+             if c in df.columns),
+            None,
+        )
+        if code_col is None:
+            st.error(
+                "No INSEE code column found in the dataset. "
+                "Expected one of: `inseecommuneprinc`, `code_insee`, `INSEE_COM`, `code`."
+            )
+        else:
+            # Identify GeoJSON feature key
+            sample_props = geojson["features"][0].get("properties", {})
+            if "code" in sample_props:
+                feature_key = "properties.code"
+            elif "INSEE_COM" in sample_props:
+                feature_key = "properties.INSEE_COM"
+            elif "codgeo" in sample_props:
+                feature_key = "properties.codgeo"
+            else:
+                feature_key = "id"
+
+            # --- Controls ---
+            cfg = _param_config()
+            available_params = [c for c in num_cols if c in cfg or c.upper() in cfg]
+            chem_first = sorted([p for p in available_params if not _is_index_param(p)])
+            indices    = sorted([p for p in available_params if     _is_index_param(p)])
+            ordered_params = chem_first + indices
+
+            ctl_param, ctl_year, ctl_mode = st.columns([2, 2, 1.4])
+            with ctl_param:
+                map_param = st.selectbox(
+                    "Parameter",
+                    ordered_params,
+                    index=ordered_params.index("CALCIUM") if "CALCIUM" in ordered_params else 0,
+                    key="map_param",
+                )
+            with ctl_year:
+                if "Year" in df.columns:
+                    years = sorted(df["Year"].dropna().unique().astype(int))
+                    if len(years) > 1:
+                        map_year = st.select_slider(
+                            "Year",
+                            options=["All years"] + list(years),
+                            value=years[-1],
+                            key="map_year",
+                        )
+                        map_year = None if map_year == "All years" else int(map_year)
+                    else:
+                        map_year = int(years[0]) if years else None
+                        st.caption(f"Single year: {map_year}")
+                else:
+                    map_year = None
+            with ctl_mode:
+                render_mode = st.radio(
+                    "Render",
+                    ["Fast (points)", "Detailed (polygons)"],
+                    index=0,
+                    key="map_mode",
+                    help="Fast = scatter on commune centroids (renders ~10× faster, "
+                         "best for interactive exploration). Detailed = full polygons "
+                         "(slower but prettier, use it for the final article figure).",
+                )
+
+            # --- Aggregate ---
+            df_key = f"{len(df)}_{map_param}_{map_year}_{iqr_factor}"
+            with st.spinner("Aggregating commune values..."):
+                agg = _aggregate_for_map(df_key, df, map_param, map_year, code_col)
+
+            if agg.empty:
+                st.warning("No data available for this parameter / year combination.")
+            else:
+                # Normalize codes on both sides (strip, zfill, str)
+                agg = agg.copy()
+                agg["code"] = agg["code"].astype(str).str.strip().str.zfill(5)
+                cent = centroids.copy()
+                cent["code"] = cent["code"].astype(str).str.strip().str.zfill(5)
+
+                # Merge centroids on INSEE code (used for Fast mode)
+                agg_pts = agg.merge(cent, on="code", how="left").dropna(
+                    subset=["lon", "lat"]
+                )
+
+                # Diagnostic if matching failed
+                n_unmatched = len(agg) - len(agg_pts)
+                if n_unmatched > 0 and len(agg_pts) == 0:
+                    st.error(
+                        f"None of the {len(agg):,} communes could be matched to the GeoJSON. "
+                        "This usually means the INSEE code format differs between your data "
+                        "and the GeoJSON file."
+                    )
+                    with st.expander("Debug info"):
+                        st.write("First 5 codes from your data:")
+                        st.code(agg["code"].head().tolist())
+                        st.write("First 5 codes from the GeoJSON:")
+                        st.code(cent["code"].head().tolist())
+                    st.stop()
+                elif n_unmatched > 0:
+                    st.caption(
+                        f"⚠️ {n_unmatched:,} communes could not be located in the GeoJSON "
+                        f"(matched {len(agg_pts):,}/{len(agg):,})"
+                    )
+
+                # --- Color scale ---
+                cfg_p = cfg.get(map_param, {"label": map_param, "cmin": None, "cmax": None})
+                label = cfg_p["label"]
+                vals = agg["value"]
+                lo, hi = vals.quantile(0.02), vals.quantile(0.98)
+                if cfg_p["cmin"] is not None: lo = max(lo, cfg_p["cmin"])
+                if cfg_p["cmax"] is not None: hi = min(hi, cfg_p["cmax"])
+
+                if _is_index_param(map_param):
+                    z0 = _index_zero(map_param)
+                    span = max(abs(lo - z0), abs(hi - z0))
+                    cmin, cmax, cmid = z0 - span, z0 + span, z0
+                    colorscale = "RdBu_r"
+                else:
+                    cmin, cmax, cmid = lo, hi, None
+                    colorscale = "Viridis"
+
+                # --- KPI cards ---
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Communes", f"{len(agg):,}")
+                k2.metric("Mean", f"{vals.mean():.2f}")
+                k3.metric("Median", f"{vals.median():.2f}")
+
+                # --- Build map ---
+                title_year = f"— {map_year}" if map_year else "— all years pooled"
+                title_text = (f"<b>{label}</b> {title_year}  ·  "
+                              f"N = {agg['n'].sum():,} measurements  ·  "
+                              f"{len(agg):,} communes")
+
+                if render_mode.startswith("Fast"):
+                    # Scattergeo on centroids — much faster, no GeoJSON sent to browser
+                    with st.spinner(f"Rendering {len(agg_pts):,} points..."):
+                        # Pack everything for hover into customdata
+                        customdata = np.column_stack([
+                            agg_pts["code"].values,
+                            agg_pts["name"].fillna("").values,
+                            agg_pts["n"].values,
+                        ])
+                        fig = go.Figure(go.Scattergeo(
+                            lon=agg_pts["lon"].values,
+                            lat=agg_pts["lat"].values,
+                            mode="markers",
+                            marker=dict(
+                                size=4,
+                                color=agg_pts["value"].values,
+                                colorscale=colorscale,
+                                cmin=cmin, cmax=cmax, cmid=cmid,
+                                showscale=True,
+                                colorbar=dict(
+                                    title=dict(text=label, font=dict(size=12)),
+                                    thickness=14, len=0.7, x=1.02,
+                                ),
+                                line=dict(width=0),
+                            ),
+                            customdata=customdata,
+                            hovertemplate=(
+                                "<b>%{customdata[1]}</b> (INSEE %{customdata[0]})<br>"
+                                f"{label}: " + "%{marker.color:.2f}<br>"
+                                "Measurements: %{customdata[2]}<extra></extra>"
+                            ),
+                        ))
+                        fig.update_geos(
+                            visible=False,
+                            bgcolor="rgba(0,0,0,0)",
+                            showframe=False,
+                            showcoastlines=True,
+                            coastlinecolor="rgba(255,255,255,0.15)",
+                            showcountries=True,
+                            countrycolor="rgba(255,255,255,0.1)",
+                            projection=dict(type="mercator"),
+                            lonaxis=dict(range=[-5.5, 9.7]),  # mainland France bounds
+                            lataxis=dict(range=[41.0, 51.5]),
+                        )
+                        fig.update_layout(
+                            title=title_text,
+                            height=720,
+                            margin=dict(l=0, r=0, t=50, b=0),
+                        )
+                else:
+                    # Choropleth (slow but pretty)
+                    with st.spinner(f"Rendering polygons for {len(agg):,} communes..."):
+                        fig = go.Figure(go.Choropleth(
+                            geojson=geojson,
+                            locations=agg["code"],
+                            featureidkey=feature_key,
+                            z=agg["value"],
+                            zmin=cmin, zmax=cmax, zmid=cmid,
+                            colorscale=colorscale,
+                            marker_line_width=0,
+                            customdata=np.column_stack([agg["n"].values]),
+                            hovertemplate=(
+                                "<b>INSEE %{location}</b><br>"
+                                f"{label}: " + "%{z:.2f}<br>"
+                                "Measurements: %{customdata[0]}<extra></extra>"
+                            ),
+                            colorbar=dict(
+                                title=dict(text=label, font=dict(size=12)),
+                                thickness=14, len=0.7, x=1.02,
+                            ),
+                        ))
+                        fig.update_geos(
+                            fitbounds="locations",
+                            visible=False,
+                            bgcolor="rgba(0,0,0,0)",
+                            showframe=False,
+                        )
+                        fig.update_layout(
+                            title=title_text,
+                            height=720,
+                            margin=dict(l=0, r=0, t=50, b=0),
+                            geo=dict(
+                                projection=dict(type="mercator"),
+                                scope="europe",
+                                center=dict(lat=46.5, lon=2.5),
+                            ),
+                        )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                # --- Bottom panel : top extreme communes + download ---
+                bot_l, bot_r = st.columns([3, 1])
+                with bot_l:
+                    with st.expander("Top 10 communes — highest values"):
+                        top_high = (
+                            agg_pts.nlargest(10, "value")
+                                   .reset_index(drop=True)
+                                   .rename(columns={"code": "INSEE",
+                                                    "name": "Commune",
+                                                    "value": label,
+                                                    "n": "N measurements"})
+                                   [["INSEE", "Commune", label, "N measurements"]]
+                        )
+                        st.dataframe(top_high, use_container_width=True, hide_index=True)
+                    with st.expander("Top 10 communes — lowest values"):
+                        top_low = (
+                            agg_pts.nsmallest(10, "value")
+                                   .reset_index(drop=True)
+                                   .rename(columns={"code": "INSEE",
+                                                    "name": "Commune",
+                                                    "value": label,
+                                                    "n": "N measurements"})
+                                   [["INSEE", "Commune", label, "N measurements"]]
+                        )
+                        st.dataframe(top_low, use_container_width=True, hide_index=True)
+                with bot_r:
+                    st.markdown("**Export**")
+                    st.download_button(
+                        "Download map (HTML)",
+                        fig.to_html(include_plotlyjs="cdn").encode("utf-8"),
+                        file_name=f"map_{map_param}_{map_year or 'all'}.html",
+                        mime="text/html",
+                    )
+                    st.download_button(
+                        "Download data (CSV)",
+                        agg_pts.to_csv(index=False).encode("utf-8"),
+                        file_name=f"map_{map_param}_{map_year or 'all'}.csv",
+                        mime="text/csv",
+                    )
