@@ -73,7 +73,7 @@ Carto pipeline/
 
 | File | Source | Purpose |
 |---|---|---|
-| `communes.geojson` | https://github.com/gregoiredavid/france-geojson | INSEE centroids for geocoding |
+| `communes.geojson` | https://github.com/gregoiredavid/france-geojson | INSEE-based geocoding for `sise_pipeline map` AND for the **Maps** tab of `sise_explorer.py` |
 | BRGM geological map (`GEO001M_CART_FR_S_FGEOL_2154.*`) | https://infoterre.brgm.fr (1/1,000,000 map) | Lithological polygons for classification |
 
 > ⚠️ A shapefile is **not a single file**. Keep together all files with the same base name: `.shp`, `.shx`, `.dbf`, `.prj`, `.cpg` (and optionally `.sbn`, `.sbx`, `.lyr`).
@@ -95,16 +95,18 @@ Carto pipeline/
               │                               │                           │
               ▼                               ▼                           ▼
      carte_<param>.html              summary_tests.csv          Interactive web app
-                                     boxplot_*.png              (correlation, scatter,
-                                     figure_article_*.pdf        distributions, Piper, 3D)
+     (final HTML, archived)          boxplot_*.png              7 tabs: correlation,
+                                     figure_article_*.pdf       scatter, regression,
+                                     classified_annual.csv      distributions, Piper,
+                                                                3D, Maps
 ```
 
 Four steps:
 
 1. **Once per year of data** — convert the two raw SISE files (RESULT + PLV) into a pivoted CSV
-2. **As many times as needed** — generate interactive maps for each parameter or index
-3. **Once for the paper** — run the full statistical analysis
-4. **Anytime** — launch the Streamlit explorer for interactive correlation / distribution analysis
+2. **For final figures of the paper** — generate definitive HTML maps for each parameter (`sise_pipeline map`)
+3. **Once for the paper** — run the full statistical analysis (`sise_stats run`)
+4. **Anytime** — launch the Streamlit explorer for interactive analysis (correlation, regression, distributions, Piper, 3D, and live Maps with parameter dropdown)
 
 ---
 
@@ -216,6 +218,8 @@ foreach ($p in $params) {
         --geojson communes.geojson --out cartes
 }
 ```
+
+> **Tip** — For *interactive exploration* without re-running the CLI for each parameter, use the **Maps** tab in `sise_explorer.py` instead (see §6.5). It computes maps on the fly with a parameter dropdown and year slider. Use this CLI command to generate the final HTML files for archiving / sharing.
 
 ---
 
@@ -337,7 +341,7 @@ Recommended --geology-field: 'LITHO_SIMP'
 
 ## 6. `sise_explorer.py` — Interactive Streamlit web app
 
-An interactive web app to explore correlations, scatter plots, distributions, Piper diagrams and 3D response surfaces from the SISE-Eaux dataset.
+A premium interactive web app to explore the SISE-Eaux dataset: correlations, scatter plots, distributions, Piper diagrams, 3D response surfaces, and an interactive map. Built with Streamlit + Plotly. Dark theme inspired by Linear / Vercel.
 
 ### 6.1 Launch
 
@@ -360,6 +364,8 @@ Three options:
 
 ### 6.3 Global filters (sidebar)
 
+These filters apply to **all 7 tabs simultaneously**.
+
 | Filter | Purpose |
 |---|---|
 | **Year** | Restrict to specific years (multi-select) |
@@ -375,35 +381,67 @@ Three options:
 | `3.0` | **Recommended** — only masks clear errors (e.g. HCO₃ at 13,000 mg/L) |
 | `5.0` | Very lenient — only the most extreme artefacts |
 
-Outlier values are replaced with NaN; rows are preserved so that other columns remain available. A per-column breakdown of masked values is shown in an expandable panel.
+Outlier values are replaced with NaN; **rows are preserved** so that other columns remain available. A per-column breakdown of masked values is shown in an expandable panel.
 
-### 6.4 The 6 tabs
+### 6.4 The 7 tabs
 
 | Tab | Purpose |
 |---|---|
-| **Correlation matrix** | Heatmap with Pearson / Spearman / Kendall, optional hierarchical clustering of variables, CSV download |
-| **Scatter + color** | X vs Y scatter colored by a 3rd variable (numeric or categorical), with optional marginal histograms, log axes |
+| **Correlation** | Heatmap with Pearson / Spearman / Kendall, optional hierarchical clustering of variables, CSV download |
+| **Scatter** | X vs Y scatter colored by a 3rd variable (numeric or categorical), with optional marginal histograms, log axes |
 | **Regression** | X vs Y scatter with OLS regression line, R², slope, intercept, p-value, and both Pearson & Spearman correlations displayed |
 | **Distributions** | Build a filter (1–2 conditions) and compare histograms of the filtered subset against the full dataset, with Mann-Whitney U test |
 | **Piper diagram** | Hydrochemical facies (Piper 1944) built from Ca, Mg, Na+K, HCO₃, Cl, SO₄ converted to meq/L, with optional coloring by a 4th variable |
-| **3D scatter** | X/Y/Z 3D scatter with optional quadratic response surface fitting (`Z = a + bX + cY + dX² + eY² + fXY`) |
+| **3D surface** | X/Y/Z 3D scatter with optional quadratic response surface fitting (`Z = a + bX + cY + dX² + eY² + fXY`) |
+| **Maps** | Interactive choropleth/scatter map of any parameter on French communes, with year slider, top-10 panels, HTML/CSV export |
 
-### 6.5 Reproducing Article Figures
+### 6.5 The Maps tab
+
+Pre-requisite: a `communes.geojson` file at the project root (the same one used by `sise_pipeline map`).
+
+**Controls** at the top of the tab:
+
+| Control | Options |
+|---|---|
+| Parameter | Any chemistry column (CA, MG, HCO₃, SO₄, Cl, NO₃, pH...) or computed index (IL, Ryznar, Larson, Basson) |
+| Year | Single year or "All years" pooled |
+| Render | **Fast (points)** ✅ default · **Detailed (polygons)** |
+
+**Fast vs Detailed** — Two render modes balance speed and quality:
+
+| Mode | Backend | Speed | When to use |
+|---|---|---|---|
+| **Fast (points)** | `Scattergeo` on commune centroids | **~10× faster** (<500ms per change) | Interactive exploration — every parameter/year change is near-instant |
+| **Detailed (polygons)** | `Choropleth` with full polygons | Slower (2-4s) | Final article figure, screenshot for publication |
+
+**Color scaling** is parameter-aware:
+- **Chemistry parameters** → Viridis (continuous), bounds at 2-98th percentile
+- **Aggressiveness indices** → RdBu_r diverging, **centered on the equilibrium value** (0 for Langelier, 6.5 for Ryznar, 0.5 for Larson, 300 for Basson). Blue = scaling/balanced, red = corrosive.
+
+**Bonus features**:
+- 3 KPI cards at the top: number of communes, mean, median for the current selection
+- Two expandable "Top 10 communes" panels (highest and lowest values) — useful to cite specific cases in the paper
+- **Download HTML** — export the interactive map as a standalone HTML file
+- **Download CSV** — export the per-commune mean values
+
+### 6.6 Reproducing Article Figures
 
 | Article figure | How to reproduce |
 |---|---|
-| Figure 13 (correlation matrix between indices) | Tab **📊 Correlation matrix** → select IL, Bason, Ryznar → Pearson |
-| Figure 13 scatter plots between indices | Tab **📈 Regression** → X = IL, Y = ryznar (then repeat with other pairs) |
-| Figure 14 (divergent points) | Tab **🎨 Scatter + color** → X = IL, Y = ryznar, color = IL × ryznar product or geological_zone |
-| Figure 15 (filtered subset histograms) | Tab **🔍 Distributions** → filter `IL > 0` AND `ryznar > 6.8`, variables: PH, CALCIUM, HCO₃ |
-| Figure 16 (3D response surfaces) | Tab **🧊 3D scatter** → X = PH, Y = CALCIUM, Z = IL, color = ryznar, expand "Fit surface" |
-| Piper diagram (Results section) | Tab **🧪 Piper diagram** → color by geological_zone |
+| Figure 13 (correlation matrix between indices) | Tab **Correlation** → select IL, Basson, Ryznar → Pearson |
+| Figure 13 scatter plots between indices | Tab **Regression** → X = IL, Y = ryznar (then repeat with other pairs) |
+| Figure 14 (divergent points) | Tab **Scatter** → X = IL, Y = ryznar, color by `geological_zone` |
+| Figure 15 (filtered subset histograms) | Tab **Distributions** → filter `IL > 0` AND `ryznar > 6.8`, variables: PH, CALCIUM, HCO₃ |
+| Figure 16 (3D response surfaces) | Tab **3D surface** → X = PH, Y = CALCIUM, Z = IL, color = ryznar, expand "Fit surface" |
+| Piper diagram (Results section) | Tab **Piper diagram** → color by `geological_zone` |
+| Any spatial map (Ca, Mg, HCO₃, indices...) | Tab **Maps** → pick parameter and year (use **Detailed** mode for export) |
 
-### 6.6 Typical checks
+### 6.7 Typical sanity checks
 
 - `Pearson r` and `R²` appear as metrics in the Regression tab. For IL vs ryznar you should recover `R² ≈ 0.94` as in the article.
-- In the Distributions tab, the "filter summary" panel shows means of the filtered vs full dataset — useful to quickly quote numbers in the article text.
+- In the Distributions tab, the summary table shows means of the filtered vs full dataset — useful to quickly quote numbers in the article text.
 - The Correlation matrix tab has a "Download matrix as CSV" button to export the correlations for supplementary materials.
+- The Maps tab in **Fast** mode should render any parameter in under 1s once the GeoJSON is loaded into the session cache.
 
 
 ## 7. Interpreting statistical results
@@ -434,7 +472,7 @@ Make sure you use `LITHO_SIMP` as the field (`--geology-field LITHO_SIMP`) **and
 
 ### How many years can I combine?
 
-As many as you want, CSVs are simply concatenated. Adjust figure legends accordingly.
+As many as you want — CSVs are simply concatenated. Adjust figure legends accordingly.
 
 ### Testing a parameter not in the default list
 
@@ -462,9 +500,42 @@ The Piper diagram needs Ca, Mg, Na, K, HCO₃, Cl and SO₄. Re-run `sise_stats.
 
 Activate the **IQR outlier filter** in the sidebar (default is 3.0). It masks aberrant values as NaN while preserving the rest of the row.
 
+### Maps tab: the Fast mode shows no points
+
+Try in this order:
+1. Click the hamburger menu (≡) at top-right of Streamlit → **Clear cache** → reload the page (F5)
+2. Restart Streamlit completely (Ctrl+C in the terminal, then `streamlit run sise_explorer.py` again)
+3. Check that `communes.geojson` is at the project root and contains a 5-character INSEE code field (`code`, `INSEE_COM` or similar)
+4. Run `debug_geojson.py` (provided separately) to inspect the GeoJSON structure
+
+### Maps tab: empty map even though aggregation says X communes
+
+The INSEE code format may differ between your data and the GeoJSON. The app will auto-show a debug panel with the first 5 codes from each side — compare them. Common issue: integer `1001` in the data vs string `"01001"` in the GeoJSON. The app handles this automatically by zero-padding to 5 chars, but if your codes contain letters (Corsican `2A001`/`2B033`) double-check the format.
+
+### Antivirus deletes Python or .venv when running Streamlit
+
+This is a **known false-positive** with some enterprise antivirus products (CrowdStrike, SentinelOne, Trend Micro, ESET) that flag local web servers and JSON parsing as suspicious. Open a ticket with your IT team requesting an exclusion for the project folder:
+
+> "I use Python with pandas/streamlit for scientific data analysis. Please add `C:\path\to\project\` as an antivirus exclusion. The folder contains only analysis scripts, no executables are distributed."
+
+Until the exclusion is granted, **back up your project folder** (`.py` files, `communes.geojson`, `csv_traite/`, `stats/`) outside of it (Dropbox, OneDrive, USB key). The `.venv` itself can be rebuilt in 3 minutes — your scripts and data must never be lost.
+
+### My VS Code says ".venv (broken)"
+
+The virtual environment lost its Python interpreter (deleted, moved, or replaced). To rebuild:
+
+```powershell
+cd "C:\Users\MD287298\Desktop\Carto pipeline"
+Remove-Item -Recurse -Force .venv
+py -m venv .venv
+.venv\Scripts\pip.exe install pandas numpy plotly geopandas shapely scipy scikit-posthocs matplotlib seaborn geopy streamlit
+```
+
+If `py` is not found, install Python 3.12 from https://www.python.org/downloads/ (check **"Add Python to PATH"** and **"Install launcher for all users"**). Use the official `python-3.12.x-amd64.exe` installer, not the Microsoft Store stub.
+
 ---
 
-## 9. Methodology 
+## 9. Methodology (paper-ready)
 
 **Why non-parametric tests:**
 - Water-chemistry distributions are strongly skewed with heavy tails (rare geogenic/anthropogenic extremes)
