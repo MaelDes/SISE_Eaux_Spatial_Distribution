@@ -664,6 +664,39 @@ def pretty_options(cols: list[str]) -> dict[str, str]:
     return {pretty(c): c for c in cols}
 
 
+def _find_insee_col(df: pd.DataFrame) -> str | None:
+    """Locate the INSEE commune code column in the dataset."""
+    candidates = (
+        "inseecommuneprinc", "code_insee", "INSEE_COM", "code", "insee",
+        "INSEE", "code_commune", "commune_code", "CODE_INSEE",
+    )
+    for c in candidates:
+        if c in df.columns:
+            return c
+    # Last resort: any column whose values look like 5-char codes
+    import re
+    pat = re.compile(r"^[\dA-Za-z]{5}$")
+    for c in df.columns:
+        s = df[c].dropna().head(50)
+        if len(s) == 0:
+            continue
+        if (s.astype(str).str.strip().str.match(pat).mean()) > 0.8:
+            return c
+    return None
+
+
+def _find_name_col(df: pd.DataFrame) -> str | None:
+    """Locate the commune-name column in the dataset."""
+    candidates = (
+        "nomcommuneprinc", "nom_commune", "NOM_COM", "nom", "commune",
+        "name", "libelle", "COMMUNE", "Commune",
+    )
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
@@ -2370,7 +2403,8 @@ with tab_map:
                             row_clicked = agg_pts.iloc[pt_idx]
                             insee_clicked = str(row_clicked["code"]).zfill(5)
                             name_clicked  = row_clicked["name"] or "(unknown)"
-                            mask_c = df["inseecommuneprinc"].astype(str).str.zfill(5) == insee_clicked
+                            insee_main = _find_insee_col(df)
+                            mask_c = df[insee_main].astype(str).str.strip().str.zfill(5) == insee_clicked if insee_main else pd.Series([False] * len(df))
                             sub_c = df[mask_c]
 
                             st.markdown("---")
@@ -2498,21 +2532,30 @@ with tab_map:
 
 @st.cache_data(show_spinner=False)
 def _build_commune_index(_df: pd.DataFrame) -> pd.DataFrame:
-    """Build a small index (one row per commune) for the autocomplete search."""
-    if "nomcommuneprinc" not in _df.columns or "inseecommuneprinc" not in _df.columns:
+    """
+    Build a small index (one row per commune) for the autocomplete search.
+    Auto-detects the INSEE code and name columns.
+    Returns an empty DataFrame if neither is found.
+    """
+    insee_col = _find_insee_col(_df)
+    name_col  = _find_name_col(_df)
+    if insee_col is None:
         return pd.DataFrame()
+    cols = [insee_col] + ([name_col] if name_col else [])
     idx = (
-        _df[["inseecommuneprinc", "nomcommuneprinc"]]
-        .drop_duplicates(subset=["inseecommuneprinc"])
-        .dropna()
+        _df[cols]
+        .drop_duplicates(subset=[insee_col])
+        .dropna(subset=[insee_col])
         .copy()
     )
-    idx["inseecommuneprinc"] = idx["inseecommuneprinc"].astype(str).str.zfill(5)
-    idx["nomcommuneprinc"]   = idx["nomcommuneprinc"].astype(str)
-    # Build a display label like "Saint-Pont (03252)"
-    idx["label"] = idx["nomcommuneprinc"] + " (" + idx["inseecommuneprinc"] + ")"
-    idx = idx.sort_values("nomcommuneprinc").reset_index(drop=True)
-    return idx
+    idx["_insee"] = idx[insee_col].astype(str).str.strip().str.zfill(5)
+    if name_col:
+        idx["_name"] = idx[name_col].astype(str)
+    else:
+        idx["_name"] = "INSEE " + idx["_insee"]
+    idx["label"] = idx["_name"] + " (" + idx["_insee"] + ")"
+    idx = idx.sort_values("_name").reset_index(drop=True)
+    return idx[["_insee", "_name", "label"]]
 
 
 with tab_commune:
@@ -2531,12 +2574,20 @@ with tab_commune:
     """, unsafe_allow_html=True)
 
     commune_idx = _build_commune_index(df)
+    insee_col_main = _find_insee_col(df)
 
     if commune_idx.empty:
         st.warning(
-            "Cannot build the commune search: the dataset is missing "
-            "`nomcommuneprinc` or `inseecommuneprinc` columns."
+            "Cannot build the commune search: the dataset has no recognizable "
+            "INSEE code column."
         )
+        with st.expander("Debug — dataset columns"):
+            st.write("**Columns in the dataset:**")
+            st.code(list(df.columns))
+            st.caption(
+                "Send these column names back if you want me to add support for them. "
+                "Expected one of: inseecommuneprinc, code_insee, INSEE_COM, code, insee."
+            )
     else:
         # --- Searchable selectbox (Streamlit's selectbox already supports type-to-search) ---
         selected_label = st.selectbox(
@@ -2551,11 +2602,11 @@ with tab_commune:
             st.info("Type the first letters of any French commune in the box above to begin.")
         else:
             row = commune_idx[commune_idx["label"] == selected_label].iloc[0]
-            insee = row["inseecommuneprinc"]
-            name  = row["nomcommuneprinc"]
+            insee = row["_insee"]
+            name  = row["_name"]
 
             # Subset of all measurements for this commune
-            mask = df["inseecommuneprinc"].astype(str).str.zfill(5) == insee
+            mask = df[insee_col_main].astype(str).str.strip().str.zfill(5) == insee
             sub  = df[mask]
 
             # ---------- Header card ----------
