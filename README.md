@@ -472,7 +472,7 @@ Make sure you use `LITHO_SIMP` as the field (`--geology-field LITHO_SIMP`) **and
 
 ### How many years can I combine?
 
-As many as you want — CSVs are simply concatenated. Adjust figure legends accordingly.
+As many as you want, CSVs are simply concatenated. Adjust figure legends accordingly.
 
 ### Testing a parameter not in the default list
 
@@ -499,30 +499,6 @@ The Piper diagram needs Ca, Mg, Na, K, HCO₃, Cl and SO₄. Re-run `sise_stats.
 ### Streamlit app: extreme outlier values on histograms (e.g. HCO₃ at 13,000)
 
 Activate the **IQR outlier filter** in the sidebar (default is 3.0). It masks aberrant values as NaN while preserving the rest of the row.
-
-### Maps tab: the Fast mode shows no points
-
-Try in this order:
-1. Click the hamburger menu (≡) at top-right of Streamlit → **Clear cache** → reload the page (F5)
-2. Restart Streamlit completely (Ctrl+C in the terminal, then `streamlit run sise_explorer.py` again)
-3. Check that `communes.geojson` is at the project root and contains a 5-character INSEE code field (`code`, `INSEE_COM` or similar)
-4. Run `debug_geojson.py` (provided separately) to inspect the GeoJSON structure
-
-### Maps tab: empty map even though aggregation says X communes
-
-The INSEE code format may differ between your data and the GeoJSON. The app will auto-show a debug panel with the first 5 codes from each side — compare them. Common issue: integer `1001` in the data vs string `"01001"` in the GeoJSON. The app handles this automatically by zero-padding to 5 chars, but if your codes contain letters (Corsican `2A001`/`2B033`) double-check the format.
-
-### Antivirus deletes Python or .venv when running Streamlit
-
-This is a **known false-positive** with some enterprise antivirus products (CrowdStrike, SentinelOne, Trend Micro, ESET) that flag local web servers and JSON parsing as suspicious. Open a ticket with your IT team requesting an exclusion for the project folder:
-
-> "I use Python with pandas/streamlit for scientific data analysis. Please add `C:\path\to\project\` as an antivirus exclusion. The folder contains only analysis scripts, no executables are distributed."
-
-Until the exclusion is granted, **back up your project folder** (`.py` files, `communes.geojson`, `csv_traite/`, `stats/`) outside of it (Dropbox, OneDrive, USB key). The `.venv` itself can be rebuilt in 3 minutes — your scripts and data must never be lost.
-
-### My VS Code says ".venv (broken)"
-
-The virtual environment lost its Python interpreter (deleted, moved, or replaced). To rebuild:
 
 ```powershell
 cd "C:\Users\MD287298\Desktop\Carto pipeline"
