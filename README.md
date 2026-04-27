@@ -1,6 +1,6 @@
 # SISE-Eaux Explorer
 
-Python tools to process the French **SISE-Eaux** database (sanitary control of distributed drinking water), produce interactive annual maps, perform publication-ready statistical tests, and explore everything through a polished Streamlit web app.
+Python tools to process the French **SISE-Eaux** database (sanitary control of distributed drinking water), produce interactive annual maps, perform statistical tests, and explore everything through a polished Streamlit web app.
 
 
 | Component | Purpose |
@@ -42,7 +42,7 @@ pip install -r requirements.txt
 | `geopandas`, `shapely` | Spatial joins (communes, geology), GeoJSON simplification |
 | `scipy.stats` | Kruskal-Wallis, Mann-Whitney U, Pearson/Spearman correlations |
 | `scikit-posthocs` | Dunn post-hoc tests (Bonferroni-Holm) |
-| `matplotlib`, `seaborn` | Annotated boxplots, publication figures |
+| `matplotlib`, `seaborn` | Annotated boxplots, figures |
 | `statsmodels` | OLS regression with confidence intervals |
 
 ---
