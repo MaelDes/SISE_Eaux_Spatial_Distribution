@@ -526,7 +526,7 @@ DEFAULT_CSV_GLOB   = "csv_traite/Analyses_insee_*.csv"
 # Replace these URLs with your own GitHub Release asset URLs.
 # ---------------------------------------------------------------------------
 CLASSIFIED_URL    = (
-    "https://github.com/MaelDes/SISE_Eaux_Spatial_Distribution/releases/download/v1.0/"
+    "https://github.com/<your-username>/<your-repo>/releases/download/v1.0/"
     "classified_annual_data.csv"
 )
 CACHE_CLASSIFIED  = ".cache/classified_annual_data.csv"
@@ -548,8 +548,13 @@ def _resolve_classified_path(user_path: str) -> str | None:
     if cache.exists() and cache.stat().st_size > 100_000:
         return str(cache)
 
-    if "<your-username>" in CLASSIFIED_URL:
-        return None  # placeholder URL, skip download
+    # Skip download if the URL is still the placeholder
+    if "<your-username>" in CLASSIFIED_URL or "<your-repo>" in CLASSIFIED_URL:
+        st.sidebar.warning(
+            "⚠️ The CLASSIFIED_URL placeholder hasn't been replaced. "
+            "Edit `sise_explorer.py` and set the URL to your GitHub Release asset."
+        )
+        return None
 
     cache.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -561,7 +566,12 @@ def _resolve_classified_path(user_path: str) -> str | None:
     except (urllib.error.URLError, OSError) as e:
         st.error(
             f"Could not download the dataset from GitHub Releases.\n\n"
-            f"**Error:** `{e}`"
+            f"**URL:** `{CLASSIFIED_URL}`\n\n"
+            f"**Error:** `{e}`\n\n"
+            "Common causes:\n"
+            "- Repo is private (make it public, or the asset URL won't be reachable)\n"
+            "- Release tag or filename mismatch — check the URL carefully\n"
+            "- No network access"
         )
         return None
 
@@ -573,6 +583,7 @@ ID_COLS = {
 
 # Pretty labels for common parameters
 PRETTY = {
+    # === Major ions (chemistry) ===
     "CALCIUM":             "Ca²⁺ (mg/L)",
     "MAGNESIUM":           "Mg²⁺ (mg/L)",
     "MAGNÉSIUM":           "Mg²⁺ (mg/L)",
@@ -583,19 +594,74 @@ PRETTY = {
     "SODIUM":              "Na⁺ (mg/L)",
     "POTASSIUM":           "K⁺ (mg/L)",
     "NITRATES (EN NO3)":   "NO₃⁻ (mg/L)",
-    "PH ":                 "pH",
-    "IL":                  "Langelier SI",
-    "IL_calc":             "Langelier SI (computed)",
-    "ryznar":              "Ryznar SI",
-    "Larson":              "Larson-Skold Index",
-    "Bason":               "Basson Index",
-    "TEMPÉRATURE DE L'EAU":"Water temperature (°C)",
-    "TEMPERATURE DE L'EAU":"Water temperature (°C)",
+    "NITRITES (EN NO2)":   "NO₂⁻ (mg/L)",
+    "AMMONIUM (NH4)":      "NH₄⁺ (mg/L)",
+    "FLUORURES":           "F⁻ (mg/L)",
+    "FER":                 "Fe (µg/L)",
+    "FER TOTAL":           "Fe total (µg/L)",
+    "MANGANESE":           "Mn (µg/L)",
+    "MANGANÈSE":           "Mn (µg/L)",
+    "SILICE":              "SiO₂ (mg/L)",
+    "SILICIUM":            "Si (mg/L)",
+
+    # === Physico-chemical parameters ===
+    "PH ":                          "pH",
+    "PH":                           "pH",
+    "TEMPÉRATURE DE L'EAU":         "Water temperature (°C)",
+    "TEMPERATURE DE L'EAU":         "Water temperature (°C)",
+    "TEMPÉRATURE":                  "Water temperature (°C)",
+    "CONDUCTIVITÉ À 25°C":          "Conductivity (µS/cm)",
+    "CONDUCTIVITE A 25°C":          "Conductivity (µS/cm)",
+    "CONDUCTIVITÉ":                 "Conductivity (µS/cm)",
+    "TURBIDITÉ":                    "Turbidity (NFU)",
+    "TURBIDITE":                    "Turbidity (NFU)",
+    "DURETÉ":                       "Hardness (°f)",
+    "DURETE":                       "Hardness (°f)",
+    "OXYGÈNE DISSOUS":              "Dissolved O₂ (mg/L)",
+    "OXYGENE DISSOUS":              "Dissolved O₂ (mg/L)",
+    "TITRE ALCALIMÉTRIQUE COMPLET": "TAC (°f)",
+    "TITRE ALCALIMETRIQUE COMPLET": "TAC (°f)",
+    "TITRE HYDROTIMÉTRIQUE":        "TH (°f)",
+
+    # === Aggressiveness indices (computed) ===
+    "IL":          "Langelier SI",
+    "IL_calc":     "Langelier SI (computed)",
+    "ryznar":      "Ryznar SI",
+    "Larson":      "Larson-Skold Index",
+    "Bason":       "Basson Index",
+
+    # === Classification grades (categorical) ===
+    "Langelier_grade":   "Langelier grade",
+    "Ryznar_grade":      "Ryznar grade",
+    "Larson_grade":      "Larson grade",
+    "Bason_grade":       "Basson grade",
+    "geological_zone":   "Geological zone",
+    "lithologie":        "Lithology",
+    "LITHO_SIMP":        "Lithology",
+
+    # === Identifiers / metadata ===
+    "inseecommuneprinc":   "INSEE code",
+    "nomcommuneprinc":     "Commune name",
+    "Year":                "Year",
+    "Annee":               "Year",
     "N_mesures":           "N raw measurements",
+    "longitude":           "Longitude",
+    "latitude":            "Latitude",
 }
 
+
 def pretty(c: str) -> str:
+    """Return the human-readable label for a column name."""
     return PRETTY.get(c, c)
+
+
+def pretty_options(cols: list[str]) -> dict[str, str]:
+    """
+    Build a mapping `pretty -> raw` for a Streamlit selectbox so that the
+    user sees nice labels but we still get the original column name.
+    Returns the dict; pass `format_func=lambda c: pretty(c)` to display.
+    """
+    return {pretty(c): c for c in cols}
 
 
 # ---------------------------------------------------------------------------
@@ -887,7 +953,8 @@ st.markdown(f"""
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab_corr, tab_scatter_c, tab_reg, tab_dist, tab_piper, tab_3d, tab_map = st.tabs([
+tab_commune, tab_corr, tab_scatter_c, tab_reg, tab_dist, tab_piper, tab_3d, tab_map = st.tabs([
+    "Commune",
     "Correlation",
     "Scatter",
     "Regression",
@@ -915,6 +982,7 @@ with tab_corr:
         corr_vars = st.multiselect(
             "Variables",
             num_cols,
+            format_func=pretty,
             default=default or num_cols[: min(10, len(num_cols))],
         )
     with c2:
@@ -993,11 +1061,11 @@ with tab_scatter_c:
     st.subheader("Scatter plot X vs Y, colored by Z")
 
     c1, c2, c3, c4 = st.columns(4)
-    x_col = c1.selectbox("X", num_cols, index=num_cols.index("CALCIUM") if "CALCIUM" in num_cols else 0, key="sc_x")
-    y_col = c2.selectbox("Y", num_cols, index=num_cols.index("HYDROGENOCARBONATES") if "HYDROGENOCARBONATES" in num_cols else 1, key="sc_y")
+    x_col = c1.selectbox("X", num_cols, index=num_cols.index("CALCIUM") if "CALCIUM" in num_cols else 0, key="sc_x", format_func=pretty)
+    y_col = c2.selectbox("Y", num_cols, index=num_cols.index("HYDROGENOCARBONATES") if "HYDROGENOCARBONATES" in num_cols else 1, key="sc_y", format_func=pretty)
 
     color_options = ["(none)"] + num_cols + cat_cols
-    z_col = c3.selectbox("Color by", color_options, index=0, key="sc_z")
+    z_col = c3.selectbox("Color by", color_options, index=0, key="sc_z", format_func=pretty)
 
     log_x = c4.checkbox("log X", value=False)
     log_y = c4.checkbox("log Y", value=False)
@@ -1110,8 +1178,8 @@ with tab_reg:
     st.subheader("Regression scatter with R², slope, p-value")
 
     c1, c2, c3 = st.columns(3)
-    x_col = c1.selectbox("X", num_cols, index=num_cols.index("IL") if "IL" in num_cols else 0, key="reg_x")
-    y_col = c2.selectbox("Y", num_cols, index=num_cols.index("ryznar") if "ryznar" in num_cols else 1, key="reg_y")
+    x_col = c1.selectbox("X", num_cols, index=num_cols.index("IL") if "IL" in num_cols else 0, key="reg_x", format_func=pretty)
+    y_col = c2.selectbox("Y", num_cols, index=num_cols.index("ryznar") if "ryznar" in num_cols else 1, key="reg_y", format_func=pretty)
     reg_type = c3.radio("Regression", ["Linear (OLS)", "Pearson r only"], horizontal=True)
 
     if x_col == y_col:
@@ -1198,7 +1266,7 @@ with tab_dist:
         # Condition 1
         f1_col = st.selectbox("Variable 1", num_cols,
                               index=num_cols.index("IL") if "IL" in num_cols else 0,
-                              key="f1_col")
+                              key="f1_col", format_func=pretty)
         f1_op  = st.selectbox("Op 1", [">", ">=", "<", "<=", "==", "!="], index=0, key="f1_op")
         f1_val = st.number_input("Value 1", value=0.0, key="f1_val")
 
@@ -1206,7 +1274,7 @@ with tab_dist:
         if use_f2:
             f2_col = st.selectbox("Variable 2", num_cols,
                                   index=num_cols.index("ryznar") if "ryznar" in num_cols else 0,
-                                  key="f2_col")
+                                  key="f2_col", format_func=pretty)
             f2_op  = st.selectbox("Op 2", [">", ">=", "<", "<=", "==", "!="], index=0, key="f2_op")
             f2_val = st.number_input("Value 2", value=6.8, key="f2_val")
 
@@ -1237,6 +1305,7 @@ with tab_dist:
         dist_vars = st.multiselect(
             "Variables to display",
             num_cols,
+            format_func=pretty,
             default=default_vars or num_cols[:3],
         )
 
@@ -1380,7 +1449,7 @@ with tab_piper:
         c1, c2 = st.columns([1, 2])
         with c1:
             color_opts = ["(none)"] + num_cols + cat_cols
-            color_by = st.selectbox("Color by", color_opts, index=0, key="piper_color")
+            color_by = st.selectbox("Color by", color_opts, index=0, key="piper_color", format_func=pretty)
             n_max = st.slider("Max points", 500, min(20000, len(df)),
                               min(5000, len(df)), step=500)
             sample = df.sample(min(n_max, len(df)), random_state=42)
@@ -1655,11 +1724,11 @@ with tab_3d:
 
     c1, c2, c3, c4 = st.columns(4)
     x3 = c1.selectbox("X", num_cols,
-                      index=num_cols.index("PH ") if "PH " in num_cols else 0, key="3d_x")
+                      index=num_cols.index("PH ") if "PH " in num_cols else 0, key="3d_x", format_func=pretty)
     y3 = c2.selectbox("Y", num_cols,
-                      index=num_cols.index("CALCIUM") if "CALCIUM" in num_cols else 1, key="3d_y")
+                      index=num_cols.index("CALCIUM") if "CALCIUM" in num_cols else 1, key="3d_y", format_func=pretty)
     z3 = c3.selectbox("Z", num_cols,
-                      index=num_cols.index("IL") if "IL" in num_cols else 2, key="3d_z")
+                      index=num_cols.index("IL") if "IL" in num_cols else 2, key="3d_z", format_func=pretty)
     color3_options = ["(none)"] + num_cols + cat_cols
     color3 = c4.selectbox("Color by", color3_options,
                           index=color3_options.index("ryznar") if "ryznar" in color3_options else 0,
@@ -1753,8 +1822,8 @@ with tab_3d:
 DEFAULT_GEOJSON = "communes.geojson"
 CACHE_GEOJSON   = ".cache/communes.geojson"
 GEOJSON_URL     = (
-    "https://github.com/MaelDes/SISE_Eaux_Spatial_Distribution/releases/download/v1.0/"
-    "communes_simplified.geojson"
+    "https://github.com/gregoiredavid/france-geojson/raw/master/"
+    "communes-version-simplifiee.geojson"
 )
 
 
@@ -2084,6 +2153,7 @@ with tab_map:
                     ordered_params,
                     index=ordered_params.index("CALCIUM") if "CALCIUM" in ordered_params else 0,
                     key="map_param",
+                    format_func=pretty,
                 )
             with ctl_year:
                 if "Year" in df.columns:
@@ -2268,7 +2338,118 @@ with tab_map:
                             ),
                         )
 
-                st.plotly_chart(fig, use_container_width=True)
+                # Render the map with click handling. plotly_events returns
+                # a list of clicked points (curveNumber, pointIndex, x, y...).
+                # Falls back to a regular plotly chart if the package is
+                # not installed.
+                clicked = None
+                try:
+                    from streamlit_plotly_events import plotly_events
+                    clicked = plotly_events(
+                        fig,
+                        click_event=True,
+                        hover_event=False,
+                        select_event=False,
+                        override_height=720,
+                        override_width="100%",
+                        key=f"map_click_{map_param}_{map_year}_{render_mode}",
+                    )
+                except ImportError:
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.caption(
+                        "💡 Install `streamlit-plotly-events` to enable "
+                        "click-to-inspect on the map: "
+                        "`pip install streamlit-plotly-events`"
+                    )
+
+                # --- Click-to-inspect panel ---
+                if clicked:
+                    pt_idx = clicked[0].get("pointIndex")
+                    if pt_idx is not None and render_mode.startswith("Fast"):
+                        if 0 <= pt_idx < len(agg_pts):
+                            row_clicked = agg_pts.iloc[pt_idx]
+                            insee_clicked = str(row_clicked["code"]).zfill(5)
+                            name_clicked  = row_clicked["name"] or "(unknown)"
+                            mask_c = df["inseecommuneprinc"].astype(str).str.zfill(5) == insee_clicked
+                            sub_c = df[mask_c]
+
+                            st.markdown("---")
+                            st.markdown(f"""
+                            <div style='background: var(--bg-card); border: 1px solid var(--accent);
+                                        border-radius: 12px; padding: 1.25rem 1.5rem;
+                                        margin: 0.5rem 0 1rem 0; backdrop-filter: blur(12px);
+                                        box-shadow: 0 0 24px rgba(167, 139, 250, 0.1);'>
+                              <div style='display: flex; align-items: baseline;
+                                          justify-content: space-between; margin-bottom: 0.5rem;'>
+                                <div>
+                                  <div style='font-size: 11px; color: #a78bfa;
+                                              font-weight: 600; letter-spacing: 0.12em;
+                                              text-transform: uppercase;'>Selected commune</div>
+                                  <div style='font-size: 1.4rem; font-weight: 700;
+                                              color: #fafafa; letter-spacing: -0.02em;
+                                              margin-top: 0.2rem;'>{name_clicked}</div>
+                                  <div style='font-size: 12px; color: #71717a;
+                                              font-family: JetBrains Mono, monospace;'>INSEE {insee_clicked}</div>
+                                </div>
+                                <div style='text-align: right; font-size: 12px; color: #a1a1aa;'>
+                                  <div><b style='color: #fafafa;'>{row_clicked['value']:.2f}</b> — {label}</div>
+                                  <div>{int(row_clicked['n'])} measurement(s)</div>
+                                </div>
+                              </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            cd_chem, cd_idx, cd_geo = st.columns([3, 2, 2])
+
+                            with cd_chem:
+                                st.markdown("**Water composition**")
+                                chem_p = [c for c in ["CALCIUM", "MAGNESIUM", "MAGNÉSIUM",
+                                                      "HYDROGENOCARBONATES", "HYDROGÉNOCARBONATES",
+                                                      "SULFATES", "CHLORURES", "SODIUM",
+                                                      "POTASSIUM", "PH ", "PH"]
+                                          if c in num_cols and c in sub_c.columns]
+                                seen = set()
+                                rows_c = []
+                                for p in chem_p:
+                                    pn = pretty(p)
+                                    if pn in seen: continue
+                                    seen.add(pn)
+                                    v = sub_c[p].mean()
+                                    if pd.isna(v): continue
+                                    rows_c.append({"Parameter": pn, "Value": f"{v:.2f}"})
+                                if rows_c:
+                                    st.dataframe(pd.DataFrame(rows_c),
+                                                 hide_index=True,
+                                                 use_container_width=True)
+
+                            with cd_idx:
+                                st.markdown("**Indices**")
+                                for p in ["IL", "ryznar", "Larson", "Bason"]:
+                                    if p not in sub_c.columns: continue
+                                    v = sub_c[p].mean()
+                                    if pd.isna(v): continue
+                                    st.metric(pretty(p), f"{v:.2f}")
+
+                            with cd_geo:
+                                st.markdown("**Geological context**")
+                                if "geological_zone" in sub_c.columns:
+                                    gz = sub_c["geological_zone"].mode()
+                                    if len(gz):
+                                        st.markdown(f"**Zone:** {gz.iloc[0]}")
+                                if "LITHO_SIMP" in sub_c.columns:
+                                    lt = sub_c["LITHO_SIMP"].mode()
+                                    if len(lt):
+                                        st.markdown(f"**Lithology:** {lt.iloc[0]}")
+                                for grade_col, lbl in [("Langelier_grade", "Langelier"),
+                                                        ("Ryznar_grade", "Ryznar"),
+                                                        ("Larson_grade", "Larson"),
+                                                        ("Bason_grade", "Basson")]:
+                                    if grade_col in sub_c.columns:
+                                        g = sub_c[grade_col].mode()
+                                        if len(g):
+                                            st.caption(f"{lbl} grade: **{g.iloc[0]}**")
+                else:
+                    st.caption("💡 Click on any point on the map to see the full water profile of that commune.")
 
                 # --- Bottom panel : top extreme communes + download ---
                 bot_l, bot_r = st.columns([3, 1])
@@ -2309,3 +2490,207 @@ with tab_map:
                         file_name=f"map_{map_param}_{map_year or 'all'}.csv",
                         mime="text/csv",
                     )
+
+
+# ============================================================================
+# Tab 0 : Commune — search a city and display its full water profile
+# ============================================================================
+
+@st.cache_data(show_spinner=False)
+def _build_commune_index(_df: pd.DataFrame) -> pd.DataFrame:
+    """Build a small index (one row per commune) for the autocomplete search."""
+    if "nomcommuneprinc" not in _df.columns or "inseecommuneprinc" not in _df.columns:
+        return pd.DataFrame()
+    idx = (
+        _df[["inseecommuneprinc", "nomcommuneprinc"]]
+        .drop_duplicates(subset=["inseecommuneprinc"])
+        .dropna()
+        .copy()
+    )
+    idx["inseecommuneprinc"] = idx["inseecommuneprinc"].astype(str).str.zfill(5)
+    idx["nomcommuneprinc"]   = idx["nomcommuneprinc"].astype(str)
+    # Build a display label like "Saint-Pont (03252)"
+    idx["label"] = idx["nomcommuneprinc"] + " (" + idx["inseecommuneprinc"] + ")"
+    idx = idx.sort_values("nomcommuneprinc").reset_index(drop=True)
+    return idx
+
+
+with tab_commune:
+    st.markdown("""
+    <div style='margin-bottom: 1rem;'>
+      <div style='font-size: 11px; color: #a78bfa; font-weight: 600; letter-spacing: 0.12em;
+                  text-transform: uppercase; margin-bottom: 0.4rem;'>
+        Commune profile
+      </div>
+      <h2 style='margin-top: 0 !important;'>Search a French commune</h2>
+      <p style='color: #a1a1aa; font-size: 13px; margin: 0.25rem 0 0 0;'>
+        Find any commune by name, see its full water composition, aggressiveness
+        indices, geological context and how it compares to the national average.
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    commune_idx = _build_commune_index(df)
+
+    if commune_idx.empty:
+        st.warning(
+            "Cannot build the commune search: the dataset is missing "
+            "`nomcommuneprinc` or `inseecommuneprinc` columns."
+        )
+    else:
+        # --- Searchable selectbox (Streamlit's selectbox already supports type-to-search) ---
+        selected_label = st.selectbox(
+            f"Search among {len(commune_idx):,} communes",
+            options=commune_idx["label"].tolist(),
+            index=None,
+            placeholder="Start typing a commune name (e.g. 'Lyon', 'Saint-Pont'...)",
+            key="commune_search",
+        )
+
+        if selected_label is None:
+            st.info("Type the first letters of any French commune in the box above to begin.")
+        else:
+            row = commune_idx[commune_idx["label"] == selected_label].iloc[0]
+            insee = row["inseecommuneprinc"]
+            name  = row["nomcommuneprinc"]
+
+            # Subset of all measurements for this commune
+            mask = df["inseecommuneprinc"].astype(str).str.zfill(5) == insee
+            sub  = df[mask]
+
+            # ---------- Header card ----------
+            n_records = len(sub)
+            years_present = (
+                sorted(sub["Year"].dropna().unique().astype(int).tolist())
+                if "Year" in sub.columns else []
+            )
+            geo_zone = (
+                sub["geological_zone"].mode().iloc[0]
+                if "geological_zone" in sub.columns and not sub["geological_zone"].isna().all()
+                else None
+            )
+            litho = (
+                sub["LITHO_SIMP"].mode().iloc[0]
+                if "LITHO_SIMP" in sub.columns and not sub["LITHO_SIMP"].isna().all()
+                else None
+            )
+
+            st.markdown(f"""
+            <div style='background: var(--bg-card); border: 1px solid var(--border);
+                        border-radius: 12px; padding: 1.25rem 1.5rem;
+                        margin: 0.5rem 0 1.5rem 0; backdrop-filter: blur(12px);'>
+              <div style='display: flex; align-items: baseline; gap: 0.75rem;
+                          margin-bottom: 0.5rem;'>
+                <div style='font-size: 1.5rem; font-weight: 700; color: #fafafa;
+                            letter-spacing: -0.02em;'>{name}</div>
+                <div style='font-size: 12px; color: #71717a;
+                            font-family: JetBrains Mono, monospace;'>INSEE {insee}</div>
+              </div>
+              <div style='display: flex; gap: 1.5rem; font-size: 12px; color: #a1a1aa;'>
+                <div><b style='color: #fafafa;'>{n_records}</b> commune-year record(s)</div>
+                {f"<div>Years: <b style='color: #fafafa;'>{', '.join(map(str, years_present))}</b></div>" if years_present else ""}
+                {f"<div>Geology: <b style='color: #fafafa;'>{geo_zone}</b></div>" if geo_zone else ""}
+                {f"<div>Lithology: <b style='color: #fafafa;'>{litho}</b></div>" if litho and litho != geo_zone else ""}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ---------- Two-column layout: composition + indices ----------
+            col_chem, col_idx = st.columns([3, 2])
+
+            # --- Chemistry panel ---
+            with col_chem:
+                st.markdown("##### Water composition")
+                chem_params = [c for c in ["CALCIUM", "MAGNESIUM", "MAGNÉSIUM",
+                                           "HYDROGENOCARBONATES", "HYDROGÉNOCARBONATES",
+                                           "SULFATES", "CHLORURES", "SODIUM", "POTASSIUM",
+                                           "NITRATES (EN NO3)", "PH ", "PH",
+                                           "TEMPÉRATURE DE L'EAU", "TEMPERATURE DE L'EAU"]
+                               if c in num_cols and c in sub.columns]
+                # Deduplicate by pretty name (keep first)
+                seen_pretty = set()
+                rows = []
+                for p in chem_params:
+                    pn = pretty(p)
+                    if pn in seen_pretty:
+                        continue
+                    seen_pretty.add(pn)
+                    val = sub[p].mean()
+                    nat = df[p].mean()
+                    if pd.isna(val):
+                        continue
+                    delta = val - nat
+                    delta_pct = (delta / nat * 100) if nat and not pd.isna(nat) and nat != 0 else 0
+                    rows.append({
+                        "Parameter": pn,
+                        "This commune": f"{val:.2f}",
+                        "National avg.": f"{nat:.2f}",
+                        "Δ vs France": f"{delta:+.2f} ({delta_pct:+.0f}%)",
+                    })
+                if rows:
+                    st.dataframe(pd.DataFrame(rows), hide_index=True,
+                                 use_container_width=True)
+                else:
+                    st.caption("No chemistry data available for this commune.")
+
+            # --- Indices panel ---
+            with col_idx:
+                st.markdown("##### Aggressiveness indices")
+                index_params = [c for c in ["IL", "IL_calc", "ryznar", "Larson", "Bason"]
+                                if c in num_cols and c in sub.columns]
+                for p in index_params:
+                    val = sub[p].mean()
+                    nat = df[p].mean()
+                    if pd.isna(val):
+                        continue
+                    delta = val - nat if not pd.isna(nat) else None
+                    # Find a categorical grade if available
+                    grade_col = {"IL": "Langelier_grade", "ryznar": "Ryznar_grade",
+                                 "Larson": "Larson_grade", "Bason": "Bason_grade"}.get(p)
+                    grade = (sub[grade_col].mode().iloc[0]
+                             if grade_col and grade_col in sub.columns
+                             and not sub[grade_col].isna().all() else None)
+                    st.metric(
+                        pretty(p),
+                        f"{val:.2f}",
+                        delta=f"{delta:+.2f} vs France" if delta is not None else None,
+                        delta_color="off",
+                        help=f"Grade: **{grade}**" if grade else None,
+                    )
+
+            # ---------- Mini map ----------
+            cent = _precompute_centroids(geojson_path) if 'geojson_path' in dir() else None
+            if cent is None:
+                # Try resolving without the user setting (Maps tab might not be open yet)
+                resolved = _resolve_geojson_path(DEFAULT_GEOJSON)
+                if resolved:
+                    cent = _precompute_centroids(resolved)
+            if cent is not None and len(cent):
+                cent_norm = cent.copy()
+                cent_norm["code"] = cent_norm["code"].astype(str).str.zfill(5)
+                m = cent_norm[cent_norm["code"] == insee]
+                if not m.empty:
+                    row_c = m.iloc[0]
+                    st.markdown("##### Location")
+                    fig_loc = go.Figure(go.Scattergeo(
+                        lon=[row_c["lon"]],
+                        lat=[row_c["lat"]],
+                        mode="markers",
+                        marker=dict(size=14, color="#a78bfa",
+                                    line=dict(color="#fafafa", width=2)),
+                        hovertemplate=f"<b>{name}</b><br>INSEE {insee}<extra></extra>",
+                    ))
+                    fig_loc.update_geos(
+                        visible=False,
+                        bgcolor="rgba(0,0,0,0)",
+                        showframe=False,
+                        showcoastlines=True,
+                        coastlinecolor="rgba(255,255,255,0.15)",
+                        showcountries=True,
+                        countrycolor="rgba(255,255,255,0.1)",
+                        projection=dict(type="mercator"),
+                        lonaxis=dict(range=[-5.5, 9.7]),
+                        lataxis=dict(range=[41.0, 51.5]),
+                    )
+                    fig_loc.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0))
+                    st.plotly_chart(fig_loc, use_container_width=True)
