@@ -1,0 +1,44 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Data — too large for Git, hosted in GitHub Releases or kept locally
+communes.geojson
+communes_simplified.geojson
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+sise_brut/
+csv_traite/
+.cache/
+
+# Stats output — most are regeneratable, but we KEEP the aggregated CSV
+# in the repo so the deployed app has data to display.
+stats/*
+!stats/classified_annual_data.csv
+
+# Output — regeneratable
+cartes/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
