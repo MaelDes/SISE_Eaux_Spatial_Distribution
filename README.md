@@ -453,14 +453,15 @@ The Commune tab uses an optimized search index (~50 ms even on 33,000 communes, 
 
 ### 6.7 Some interesting figures
 
+| Objective | Dashboard workflow |
 |---|---|
-| correlation matrix between indices | Tab **Correlation** → select IL, Basson, Ryznar → Pearson |
-| scatter plots between indices | Tab **Regression** → X = IL, Y = ryznar (then repeat with other pairs) |
-| divergent points | Tab **Scatter** → X = IL, Y = ryznar, color by `geological_zone` |
-| filtered subset histograms | Tab **Distributions** → filter `IL > 0` AND `ryznar > 6.8`, variables: PH, CALCIUM, HCO₃ |
-| 3D response surfaces | Tab **3D surface** → X = PH, Y = CALCIUM, Z = IL, color = ryznar, expand "Fit surface" |
-| Piper diagram  | Tab **Piper diagram** → color by `geological_zone` |
-| Any spatial map (Ca, Mg, HCO₃, indices...) | Tab **Maps** → pick parameter and year (use **Detailed** mode for export) |
+| Correlation matrix between indices | `Correlation` tab → select `IL`, `Basson`, `Ryznar` → choose `Pearson` |
+| Scatter plots between indices | `Regression` tab → set `X = IL`, `Y = Ryznar` → repeat with other index pairs |
+| Divergent points | `Scatter` tab → set `X = IL`, `Y = Ryznar` → color by `geological_zone` |
+| Filtered subset histograms | `Distributions` tab → apply filter `IL > 0 AND Ryznar > 6.8` → select `PH`, `CALCIUM`, `HCO₃` |
+| 3D response surfaces | `3D Surface` tab → set `X = PH`, `Y = CALCIUM`, `Z = IL`, color by `Ryznar` → expand `Fit surface` |
+| Piper diagram | `Piper Diagram` tab → color by `geological_zone` |
+| Spatial maps: Ca, Mg, HCO₃, indices, etc. | `Maps` tab → select parameter and year → use `Detailed mode` for export |
 
 ### 6.8 Typical sanity checks
 
