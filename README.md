@@ -2,7 +2,6 @@
 
 Python tools to process the French **SISE-Eaux** database (sanitary control of distributed drinking water), produce interactive annual maps, perform publication-ready statistical tests, and explore everything through a polished Streamlit web app.
 
-> Companion code for the article *"Spatial distribution of water aggressiveness indices over France"* (Desrochers et al., in prep.).
 
 | Component | Purpose |
 |---|---|
