@@ -493,7 +493,7 @@ With SISE sample sizes (typically N = 15,000 to 100,000), **p-values are always 
 
 ---
 
-## 9. Methodology (paper-ready)
+## 9. Methodology
 
 **Why non-parametric tests:**
 - Water-chemistry distributions are strongly skewed with heavy tails (rare geogenic/anthropogenic extremes)
@@ -559,11 +559,6 @@ python simplify_geojson.py
 
 ## License
 
-Code: MIT.
 SISE-Eaux data: provided by the French Ministry of Health under [Licence Ouverte](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
 GeoJSON of communes: from [gregoiredavid/france-geojson](https://github.com/gregoiredavid/france-geojson) (MIT).
 BRGM geological map: BRGM, redistributed under research/educational use.
-
-## Citation
-
-If you use this code in academic work, please cite the article (currently in preparation) and link to this repository.
