@@ -518,6 +518,53 @@ except AttributeError:
 DEFAULT_CLASSIFIED = "stats/classified_annual_data.csv"
 DEFAULT_CSV_GLOB   = "csv_traite/Analyses_insee_*.csv"
 
+# ---------------------------------------------------------------------------
+# Cloud deployment: data files are too large for the Git repo, so we host
+# them in a GitHub Release and download them on first launch. Once cached
+# on disk, subsequent loads are instant.
+#
+# Replace these URLs with your own GitHub Release asset URLs.
+# ---------------------------------------------------------------------------
+CLASSIFIED_URL    = (
+    "https://github.com/MaelDes/SISE_Eaux_Spatial_Distribution/releases/download/v1.0/"
+    "classified_annual_data.csv"
+)
+CACHE_CLASSIFIED  = ".cache/classified_annual_data.csv"
+
+
+def _resolve_classified_path(user_path: str) -> str | None:
+    """
+    Resolve the classified CSV path:
+      1. The user-provided path, if it exists locally
+      2. The internal cache file, if it exists
+      3. Download from CLASSIFIED_URL into the cache
+    """
+    import urllib.request, urllib.error
+
+    if user_path and Path(user_path).exists():
+        return user_path
+
+    cache = Path(CACHE_CLASSIFIED)
+    if cache.exists() and cache.stat().st_size > 100_000:
+        return str(cache)
+
+    if "<your-username>" in CLASSIFIED_URL:
+        return None  # placeholder URL, skip download
+
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with st.spinner(
+            "First-time setup: downloading the dataset (~35 MB, one-time only)..."
+        ):
+            urllib.request.urlretrieve(CLASSIFIED_URL, cache)
+        return str(cache)
+    except (urllib.error.URLError, OSError) as e:
+        st.error(
+            f"Could not download the dataset from GitHub Releases.\n\n"
+            f"**Error:** `{e}`"
+        )
+        return None
+
 # Columns that identify a sample (never used as numerical variables)
 ID_COLS = {
     "referenceprel", "dateprel", "nomcommuneprinc", "inseecommuneprinc",
@@ -668,14 +715,16 @@ status_msg = ""
 
 if source.startswith("Pre-aggregated"):
     default_path = st.sidebar.text_input("Path", DEFAULT_CLASSIFIED)
-    if Path(default_path).exists():
-        with st.spinner(f"Loading {default_path}..."):
-            df = load_classified(default_path)
-        status_msg = f"Loaded {len(df):,} rows from {default_path}"
+    resolved = _resolve_classified_path(default_path)
+    if resolved is not None:
+        with st.spinner(f"Loading {resolved}..."):
+            df = load_classified(resolved)
+        status_msg = f"Loaded {len(df):,} rows from {resolved}"
     else:
         st.sidebar.warning(
             f"File not found: {default_path}\n\n"
-            "Run `sise_stats.py run` first, or switch to 'Raw yearly CSVs'."
+            "Run `sise_stats.py run` first to generate it, "
+            "or switch to 'Raw yearly CSVs'."
         )
 
 elif source.startswith("Raw yearly CSVs"):
@@ -1704,8 +1753,8 @@ with tab_3d:
 DEFAULT_GEOJSON = "communes.geojson"
 CACHE_GEOJSON   = ".cache/communes.geojson"
 GEOJSON_URL     = (
-    "https://github.com/gregoiredavid/france-geojson/raw/master/"
-    "communes-version-simplifiee.geojson"
+    "https://github.com/MaelDes/SISE_Eaux_Spatial_Distribution/releases/download/v1.0/"
+    "communes_simplified.geojson"
 )
 
 
