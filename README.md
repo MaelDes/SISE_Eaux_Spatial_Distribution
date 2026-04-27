@@ -466,10 +466,6 @@ With SISE sample sizes (typically N = 15,000 to 100,000), **p-values are always 
 
 SISE CSVs can contain up to 1500 columns (one per unique parameter). The script automatically filters to the ~15 useful columns. If the error persists, check that your `load_csv_files` signature includes `keep_columns` (recent versions).
 
-### Geological categories still appear in French in my boxplots
-
-Make sure you use `LITHO_SIMP` as the field (`--geology-field LITHO_SIMP`) **and** pass `--no-simplify`. The script auto-translates the 13 BRGM classes via the `LITHO_SIMP_FR_EN` dictionary.
-
 ### How many years can I combine?
 
 As many as you want, CSVs are simply concatenated. Adjust figure legends accordingly.
@@ -499,15 +495,6 @@ The Piper diagram needs Ca, Mg, Na, K, HCO₃, Cl and SO₄. Re-run `sise_stats.
 ### Streamlit app: extreme outlier values on histograms (e.g. HCO₃ at 13,000)
 
 Activate the **IQR outlier filter** in the sidebar (default is 3.0). It masks aberrant values as NaN while preserving the rest of the row.
-
-```powershell
-cd "C:\Users\MD287298\Desktop\Carto pipeline"
-Remove-Item -Recurse -Force .venv
-py -m venv .venv
-.venv\Scripts\pip.exe install pandas numpy plotly geopandas shapely scipy scikit-posthocs matplotlib seaborn geopy streamlit
-```
-
-If `py` is not found, install Python 3.12 from https://www.python.org/downloads/ (check **"Add Python to PATH"** and **"Install launcher for all users"**). Use the official `python-3.12.x-amd64.exe` installer, not the Microsoft Store stub.
 
 ---
 
