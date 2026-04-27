@@ -530,6 +530,7 @@ CLASSIFIED_URL    = (
     "classified_annual_data.csv"
 )
 CACHE_CLASSIFIED  = ".cache/classified_annual_data.csv"
+COMMUNE_NAMES_CACHE = ".cache/communes_names.csv"
 
 
 def _resolve_classified_path(user_path: str) -> str | None:
@@ -578,7 +579,7 @@ def _resolve_classified_path(user_path: str) -> str | None:
 # Columns that identify a sample (never used as numerical variables)
 ID_COLS = {
     "referenceprel", "dateprel", "nomcommuneprinc", "inseecommuneprinc",
-    "Year", "Annee", "longitude", "latitude",
+    "Year", "Annee", "longitude", "latitude", "_insee_norm",
 }
 
 # Pretty labels for common parameters
@@ -673,14 +674,17 @@ def _find_insee_col(df: pd.DataFrame) -> str | None:
     for c in candidates:
         if c in df.columns:
             return c
-    # Last resort: any column whose values look like 5-char codes
+    # Last resort: scan a *limited* number of object/str columns
+    # (avoid scanning hundreds of numeric columns for nothing)
     import re
     pat = re.compile(r"^[\dA-Za-z]{5}$")
-    for c in df.columns:
-        s = df[c].dropna().head(50)
+    object_cols = [c for c in df.columns
+                   if df[c].dtype == "object" or pd.api.types.is_string_dtype(df[c])]
+    for c in object_cols[:20]:  # cap at 20 to avoid lag on wide datasets
+        s = df[c].dropna().head(20).astype(str).str.strip()
         if len(s) == 0:
             continue
-        if (s.astype(str).str.strip().str.match(pat).mean()) > 0.8:
+        if (s.str.match(pat).mean()) > 0.8:
             return c
     return None
 
@@ -701,11 +705,54 @@ def _find_name_col(df: pd.DataFrame) -> str | None:
 # Data loading
 # ---------------------------------------------------------------------------
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def load_classified(path: str) -> pd.DataFrame:
-    """Load the pre-aggregated file produced by sise_stats.py"""
-    df = pd.read_csv(path, low_memory=False)
-    return df
+    """Load the pre-aggregated file produced by sise_stats.py with compact dtypes.
+
+    st.cache_resource avoids Streamlit keeping extra serialized copies of the
+    full dataframe. The app does not mutate this object unless the optional IQR
+    filter is enabled, in which case a copy is made explicitly downstream.
+    """
+    header = pd.read_csv(path, nrows=0).columns.tolist()
+
+    string_cols = {
+        "inseecommuneprinc", "code_insee", "INSEE_COM", "code", "insee",
+        "nomcommuneprinc", "nom_commune", "NOM_COM", "nom", "commune",
+    }
+    category_cols = {
+        "geological_zone", "LITHO_SIMP", "lithologie",
+        "Langelier_grade", "Ryznar_grade", "Larson_grade", "Bason_grade", "Basson_grade",
+    }
+    year_cols = {"Year", "Annee"}
+
+    dtype_map = {}
+    for c in header:
+        if c in string_cols:
+            dtype_map[c] = "string"
+        elif c in category_cols:
+            dtype_map[c] = "category"
+        elif c in year_cols:
+            dtype_map[c] = "Int16"
+        else:
+            # The classified file is mostly numeric; float32 is enough for
+            # interactive plotting and roughly halves memory vs float64.
+            dtype_map[c] = "float32"
+
+    try:
+        df = pd.read_csv(path, dtype=dtype_map, memory_map=True)
+        if "inseecommuneprinc" in df.columns:
+            df["_insee_norm"] = df["inseecommuneprinc"].astype("string").str.strip().str.zfill(5)
+        return df
+    except (TypeError, ValueError):
+        # Fallback for unexpected columns containing text.
+        df = pd.read_csv(path, low_memory=False, memory_map=True)
+        for c in df.select_dtypes(include=["float64"]).columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
+        for c in category_cols.intersection(df.columns):
+            df[c] = df[c].astype("category")
+        if "inseecommuneprinc" in df.columns:
+            df["_insee_norm"] = df["inseecommuneprinc"].astype("string").str.strip().str.zfill(5)
+        return df
 
 
 @st.cache_data(show_spinner=False)
@@ -741,29 +788,23 @@ def load_and_aggregate(csv_paths: list[str]) -> pd.DataFrame:
 
 
 def _is_truly_numeric(series: pd.Series, threshold: float = 0.8) -> bool:
-    """
-    True if more than `threshold` fraction of non-null values can be coerced
-    to a finite number.
+    """Fast numeric detection without coercing entire large columns on every rerun."""
+    if pd.api.types.is_numeric_dtype(series):
+        return True
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        cats = pd.Series(series.cat.categories)
+        if len(cats) == 0:
+            return False
+        coerced = pd.to_numeric(cats, errors="coerce")
+        return (1 - coerced.isna().mean()) >= threshold
 
-    Unlike `pd.api.types.is_numeric_dtype`, this works reliably for:
-      - pandas Categorical of numbers  -> treated as numeric
-      - pandas Categorical of strings  -> NOT numeric
-      - object dtype with numeric strings -> numeric
-      - object dtype with actual strings -> NOT numeric
-    """
     s = series.dropna()
     if len(s) == 0:
         return False
-    # For Categorical: inspect the categories themselves, not the codes
-    if isinstance(s.dtype, pd.CategoricalDtype):
-        cats = s.cat.categories
-        coerced = pd.to_numeric(pd.Series(cats), errors="coerce")
-        return (1 - coerced.isna().mean()) >= threshold
-    # For everything else: try coercing the values
+    if len(s) > 2000:
+        s = s.sample(2000, random_state=0)
     coerced = pd.to_numeric(s, errors="coerce")
     return (1 - coerced.isna().mean()) >= threshold
-
-
 def numeric_columns(df: pd.DataFrame) -> list[str]:
     """All columns with actual numeric content (see _is_truly_numeric)."""
     return [c for c in df.columns
@@ -917,7 +958,7 @@ st.sidebar.markdown("**Outlier filter (IQR)**")
 iqr_factor = st.sidebar.select_slider(
     "Replace outliers beyond Q1/Q3 ± k × IQR with NaN",
     options=[0.0, 1.5, 3.0, 5.0],
-    value=3.0,
+    value=0.0,
     help=(
         "Typical values: 1.5 (strict, masks most outliers), "
         "3.0 (only masks clear errors, recommended), "
@@ -1852,7 +1893,12 @@ with tab_3d:
 # Replace GEOJSON_URL with your own GitHub Release URL once you upload the
 # simplified file. The placeholder below points to a popular public mirror
 # of the same data (Etalab, ~14 MB).
-DEFAULT_GEOJSON = "communes.geojson"
+DEFAULT_GEOJSON = "communes_simplified.geojson"
+GEOJSON_LOCAL_CANDIDATES = (
+    "communes_simplified.geojson",
+    "communes.geojson",
+    "communes-version-simplifiee.geojson",
+)
 CACHE_GEOJSON   = ".cache/communes.geojson"
 GEOJSON_URL     = (
     "https://github.com/gregoiredavid/france-geojson/raw/master/"
@@ -1860,7 +1906,7 @@ GEOJSON_URL     = (
 )
 
 
-def _resolve_geojson_path(user_path: str) -> str | None:
+def _resolve_geojson_path(user_path: str, show_errors: bool = True) -> str | None:
     """
     Resolve the GeoJSON path with the following priority:
       1. The user-provided path, if the file exists locally
@@ -1872,9 +1918,12 @@ def _resolve_geojson_path(user_path: str) -> str | None:
     """
     import urllib.request, urllib.error
 
-    # 1) User-provided local path
-    if user_path and Path(user_path).exists():
-        return user_path
+    # 1) User-provided local path, then common local filenames.
+    # This avoids falling back to the network when the simplified GeoJSON is
+    # present under a slightly different name.
+    for candidate in dict.fromkeys([user_path, *GEOJSON_LOCAL_CANDIDATES]):
+        if candidate and Path(candidate).exists():
+            return candidate
 
     # 2) Internal cache from a previous download
     cache = Path(CACHE_GEOJSON)
@@ -1891,12 +1940,13 @@ def _resolve_geojson_path(user_path: str) -> str | None:
             urllib.request.urlretrieve(GEOJSON_URL, cache)
         return str(cache)
     except (urllib.error.URLError, OSError) as e:
-        st.error(
-            f"Could not download the communes GeoJSON.\n\n"
-            f"**Error:** `{e}`\n\n"
-            f"To fix: place a `communes.geojson` file at the project root, "
-            f"or check your network connection."
-        )
+        if show_errors:
+            st.error(
+                f"Could not download the communes GeoJSON.\n\n"
+                f"**Error:** `{e}`\n\n"
+                f"To fix: place a `communes_simplified.geojson` or `communes.geojson` "
+                f"file at the project root, or check your network connection."
+            )
         return None
 
 
@@ -1913,6 +1963,29 @@ def _load_geojson(path: str) -> dict | None:
         return None
     with open(p, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _detect_geojson_feature_key(geojson: dict) -> str:
+    """Return the Plotly featureidkey matching French commune INSEE codes."""
+    features = geojson.get("features", []) if isinstance(geojson, dict) else []
+    if not features:
+        return "properties.code"
+
+    candidate_props = ("code", "INSEE_COM", "codgeo", "insee", "CODE_INSEE")
+    for key in candidate_props:
+        hits = 0
+        for feat in features[:50]:
+            props = feat.get("properties") or {}
+            val = props.get(key)
+            if val is not None and len(str(val).strip()) == 5:
+                hits += 1
+        if hits:
+            return f"properties.{key}"
+
+    if any((feat.get("id") is not None and len(str(feat.get("id")).strip()) == 5) for feat in features[:50]):
+        return "id"
+
+    return "properties.code"
 
 
 @st.cache_resource(show_spinner=False)
@@ -2057,6 +2130,65 @@ def _index_zero(param: str) -> float | None:
     }.get(param)
 
 
+@st.cache_resource(show_spinner=False)
+def _load_commune_names_df() -> pd.DataFrame:
+    """Load a compact INSEE -> commune-name table for map hover labels.
+
+    This intentionally avoids loading the polygon GeoJSON during normal fast-map
+    use. The preferred source is `communes_names.csv`, generated once from the
+    GeoJSON. If it is missing, the function falls back to an empty table.
+    """
+    candidates = (Path("communes_names.csv"), Path(COMMUNE_NAMES_CACHE))
+    for p in candidates:
+        if not p.exists() or p.stat().st_size < 1000:
+            continue
+        try:
+            names = pd.read_csv(p, dtype={"code": "string", "name": "string"})
+        except Exception:
+            continue
+
+        code_col = "code" if "code" in names.columns else None
+        name_col = "name" if "name" in names.columns else None
+        if code_col is None:
+            for c in names.columns:
+                if c.lower() in {"insee", "insee_com", "codgeo", "code_insee"}:
+                    code_col = c
+                    break
+        if name_col is None:
+            for c in names.columns:
+                if c.lower() in {"nom", "nom_com", "commune", "libelle"}:
+                    name_col = c
+                    break
+        if code_col is None or name_col is None:
+            continue
+
+        out = names[[code_col, name_col]].rename(columns={code_col: "code", name_col: "name"}).copy()
+        out["code"] = out["code"].astype("string").str.strip().str.zfill(5)
+        out["name"] = out["name"].astype("string").str.strip()
+        out = out.dropna(subset=["code"]).drop_duplicates(subset=["code"])
+        return out
+
+    return pd.DataFrame(columns=["code", "name"])
+
+
+def _enrich_map_with_commune_names(agg: pd.DataFrame) -> pd.DataFrame:
+    """Attach commune names to aggregated map data without loading polygons."""
+    if agg.empty or "code" not in agg.columns:
+        return agg
+
+    out = agg.copy()
+    out["code"] = out["code"].astype(str).str.strip().str.zfill(5)
+    names = _load_commune_names_df()
+    if not names.empty:
+        out = out.merge(names, on="code", how="left")
+    else:
+        out["name"] = pd.NA
+
+    out["name"] = out["name"].fillna("INSEE " + out["code"])
+    out["label"] = out["name"] + " (" + out["code"] + ")"
+    return out
+
+
 @st.cache_data(show_spinner=False)
 def _aggregate_for_map(
     df_pickle_key: str,
@@ -2066,28 +2198,250 @@ def _aggregate_for_map(
     code_col: str,
 ) -> pd.DataFrame:
     """
-    Aggregate the dataframe to (commune, mean_value, n_measures) for one
-    parameter and optionally one year. The first arg is a pickle-key just to
-    let Streamlit invalidate the cache when df changes.
+    Aggregate the dataframe to one row per commune for the selected parameter.
+
+    Fast maps use the longitude/latitude columns already present in
+    classified_annual_data.csv. This avoids loading the communes GeoJSON just
+    to display points, and prevents the empty-map issue caused by centroid
+    matching failures.
     """
-    work = df[[code_col, param]].copy()
+    cols = [code_col, param]
+    has_coords = {"longitude", "latitude"}.issubset(df.columns)
+    if has_coords:
+        cols += ["longitude", "latitude"]
     if year is not None and "Year" in df.columns:
-        work = work.assign(Year=df["Year"])
-        work = work[work["Year"] == year]
-        work = work.drop(columns=["Year"])
+        cols += ["Year"]
+
+    # Keep a narrow working frame only. This avoids copying the full dataset.
+    work = df[list(dict.fromkeys(cols))].copy()
+
+    if year is not None and "Year" in work.columns:
+        work = work[work["Year"] == year].drop(columns=["Year"])
+
+    work[param] = pd.to_numeric(work[param], errors="coerce")
     work = work.dropna(subset=[param])
     if work.empty:
-        return work
+        return pd.DataFrame(columns=["code", "value", "n", "lon", "lat"])
+
+    agg_spec = {
+        "value": (param, "mean"),
+        "n": (param, "size"),
+    }
+
+    if has_coords:
+        work["longitude"] = pd.to_numeric(work["longitude"], errors="coerce")
+        work["latitude"] = pd.to_numeric(work["latitude"], errors="coerce")
+        agg_spec["lon"] = ("longitude", "mean")
+        agg_spec["lat"] = ("latitude", "mean")
 
     grouped = (
-        work.groupby(code_col, as_index=False)
-            .agg(value=(param, "mean"), n=(param, "size"))
+        work.groupby(code_col, as_index=False, observed=True)
+            .agg(**agg_spec)
+            .rename(columns={code_col: "code"})
     )
-    grouped = grouped.rename(columns={code_col: "code"})
-    # Pad INSEE codes to 5 chars to match GeoJSON (e.g. 1001 -> "01001")
-    grouped["code"] = grouped["code"].astype(str).str.zfill(5)
+
+    grouped["code"] = grouped["code"].astype(str).str.strip().str.zfill(5)
+
+    if not has_coords:
+        grouped["lon"] = np.nan
+        grouped["lat"] = np.nan
+
     return grouped
 
+
+
+def _extract_clicked_insee(clicked: list[dict] | None, trace_lookup: dict[int, pd.DataFrame]) -> str | None:
+    """Return the INSEE code selected on the map, normalized to five characters."""
+    if not clicked:
+        return None
+    ev = clicked[0] or {}
+
+    loc = ev.get("location")
+    if loc not in (None, ""):
+        return str(loc).strip().zfill(5)
+
+    cd = ev.get("customdata")
+    if isinstance(cd, (list, tuple, np.ndarray)):
+        if len(cd) >= 2 and str(cd[1]).strip():
+            return str(cd[1]).strip().zfill(5)
+        if len(cd) >= 1 and str(cd[0]).strip() and len(str(cd[0]).strip()) <= 8:
+            return str(cd[0]).strip().zfill(5)
+    elif cd not in (None, ""):
+        s = str(cd).strip()
+        if len(s) <= 8:
+            return s.zfill(5)
+
+    curve = int(ev.get("curveNumber", 0) or 0)
+    pt_idx = ev.get("pointIndex", ev.get("pointNumber"))
+    if pt_idx is None:
+        return None
+    try:
+        pt_idx = int(pt_idx)
+    except Exception:
+        return None
+
+    click_df = trace_lookup.get(curve)
+    if click_df is None or pt_idx < 0 or pt_idx >= len(click_df) or "code" not in click_df.columns:
+        return None
+    return str(click_df.iloc[pt_idx]["code"]).strip().zfill(5)
+
+
+def _subset_commune_rows_for_map(df: pd.DataFrame, code_col: str, insee: str) -> pd.DataFrame:
+    """Return the filtered rows of the selected commune."""
+    insee = str(insee).strip().zfill(5)
+    if "_insee_norm" in df.columns and code_col == "inseecommuneprinc":
+        mask = df["_insee_norm"].eq(insee).to_numpy()
+    else:
+        mask = df[code_col].astype("string").str.strip().str.zfill(5).eq(insee).to_numpy()
+    return df.loc[mask]
+
+
+def _render_plotly_with_click(fig: go.Figure, key: str) -> list[dict] | None:
+    """Render a Plotly figure with click capture when streamlit-plotly-events is installed."""
+    try:
+        from streamlit_plotly_events import plotly_events
+        return plotly_events(
+            fig,
+            click_event=True,
+            hover_event=False,
+            select_event=False,
+            override_height=720,
+            override_width="100%",
+            key=key,
+        )
+    except ImportError:
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Install `streamlit-plotly-events` to enable click-to-inspect on the map: "
+            "`pip install streamlit-plotly-events`"
+        )
+        return None
+
+
+def _show_clicked_commune_profile(
+    df: pd.DataFrame,
+    code_col: str,
+    insee_clicked: str,
+    selected_row: pd.Series | None,
+    label: str,
+    num_cols: list[str],
+) -> None:
+    """Display composition, indices and geology for a commune selected on the map."""
+    insee_clicked = str(insee_clicked).strip().zfill(5)
+    sub_c = _subset_commune_rows_for_map(df, code_col, insee_clicked)
+    if sub_c.empty:
+        st.warning(f"No data row found for INSEE {insee_clicked} after the current filters.")
+        return
+
+    name_clicked = f"INSEE {insee_clicked}"
+    if selected_row is not None and "name" in selected_row.index and pd.notna(selected_row["name"]):
+        name_clicked = str(selected_row["name"])
+    else:
+        names = _load_commune_names_df()
+        if not names.empty:
+            m = names[names["code"].astype(str).str.zfill(5).eq(insee_clicked)]
+            if not m.empty and pd.notna(m.iloc[0]["name"]):
+                name_clicked = str(m.iloc[0]["name"])
+
+    value_txt = ""
+    n_txt = ""
+    if selected_row is not None:
+        if "value" in selected_row.index and pd.notna(selected_row["value"]):
+            value_txt = f"<div><b style='color: #fafafa;'>{float(selected_row['value']):.2f}</b> — {label}</div>"
+        if "n" in selected_row.index and pd.notna(selected_row["n"]):
+            n_txt = f"<div>{int(selected_row['n'])} measurement(s)</div>"
+
+    years_present = sorted(sub_c["Year"].dropna().astype(int).unique().tolist()) if "Year" in sub_c.columns else []
+    years_txt = f"<div>Years: <b style='color: #fafafa;'>{', '.join(map(str, years_present))}</b></div>" if years_present else ""
+
+    st.markdown("---")
+    st.markdown(f"""
+    <div style='background: var(--bg-card); border: 1px solid var(--accent);
+                border-radius: 12px; padding: 1.25rem 1.5rem;
+                margin: 0.5rem 0 1rem 0; backdrop-filter: blur(12px);
+                box-shadow: 0 0 24px rgba(167, 139, 250, 0.1);'>
+      <div style='display: flex; align-items: baseline;
+                  justify-content: space-between; margin-bottom: 0.5rem; gap: 1rem;'>
+        <div>
+          <div style='font-size: 11px; color: #a78bfa;
+                      font-weight: 600; letter-spacing: 0.12em;
+                      text-transform: uppercase;'>Selected commune</div>
+          <div style='font-size: 1.4rem; font-weight: 700;
+                      color: #fafafa; letter-spacing: -0.02em;
+                      margin-top: 0.2rem;'>{name_clicked}</div>
+          <div style='font-size: 12px; color: #71717a;
+                      font-family: JetBrains Mono, monospace;'>INSEE {insee_clicked}</div>
+        </div>
+        <div style='text-align: right; font-size: 12px; color: #a1a1aa;'>
+          {value_txt}
+          {n_txt}
+          {years_txt}
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    cd_chem, cd_idx, cd_geo = st.columns([3, 2, 2])
+
+    with cd_chem:
+        st.markdown("**Water composition**")
+        chem_p = [c for c in ["CALCIUM", "MAGNESIUM", "MAGNÉSIUM",
+                              "HYDROGENOCARBONATES", "HYDROGÉNOCARBONATES",
+                              "SULFATES", "CHLORURES", "SODIUM", "POTASSIUM",
+                              "NITRATES (EN NO3)", "PH ", "PH",
+                              "TEMPÉRATURE DE L'EAU", "TEMPERATURE DE L'EAU"]
+                  if c in num_cols and c in sub_c.columns]
+        seen = set()
+        rows_c = []
+        for p in chem_p:
+            pn = pretty(p)
+            if pn in seen:
+                continue
+            seen.add(pn)
+            v = pd.to_numeric(sub_c[p], errors="coerce").mean()
+            nat = pd.to_numeric(df[p], errors="coerce").mean() if p in df.columns else np.nan
+            if pd.isna(v):
+                continue
+            delta = v - nat if not pd.isna(nat) else np.nan
+            rows_c.append({
+                "Parameter": pn,
+                "Selected commune": f"{v:.2f}",
+                "Current dataset avg.": f"{nat:.2f}" if not pd.isna(nat) else "—",
+                "Δ": f"{delta:+.2f}" if not pd.isna(delta) else "—",
+            })
+        if rows_c:
+            st.dataframe(pd.DataFrame(rows_c), hide_index=True, use_container_width=True)
+        else:
+            st.caption("No chemistry data available for this commune.")
+
+    with cd_idx:
+        st.markdown("**Indices**")
+        for p in ["IL", "IL_calc", "ryznar", "Larson", "Bason"]:
+            if p not in sub_c.columns:
+                continue
+            v = pd.to_numeric(sub_c[p], errors="coerce").mean()
+            if pd.isna(v):
+                continue
+            st.metric(pretty(p), f"{v:.2f}")
+
+    with cd_geo:
+        st.markdown("**Geological context**")
+        if "geological_zone" in sub_c.columns:
+            gz = sub_c["geological_zone"].dropna().mode()
+            if len(gz):
+                st.markdown(f"**Zone:** {gz.iloc[0]}")
+        if "LITHO_SIMP" in sub_c.columns:
+            lt = sub_c["LITHO_SIMP"].dropna().mode()
+            if len(lt):
+                st.markdown(f"**Lithology:** {lt.iloc[0]}")
+        for grade_col, lbl in [("Langelier_grade", "Langelier"),
+                               ("Ryznar_grade", "Ryznar"),
+                               ("Larson_grade", "Larson"),
+                               ("Bason_grade", "Basson")]:
+            if grade_col in sub_c.columns:
+                g = sub_c[grade_col].dropna().mode()
+                if len(g):
+                    st.caption(f"{lbl} grade: **{g.iloc[0]}**")
 
 with tab_map:
     st.markdown("""
@@ -2096,264 +2450,307 @@ with tab_map:
                   text-transform: uppercase; margin-bottom: 0.4rem;'>
         Geographic visualisation
       </div>
-      <h2 style='margin-top: 0 !important;'>Interactive choropleth map</h2>
+      <h2 style='margin-top: 0 !important;'>Interactive map</h2>
       <p style='color: #a1a1aa; font-size: 13px; margin: 0.25rem 0 0 0;'>
         Mean value per commune for the selected parameter and year.
-        Built directly from the loaded dataset — no pre-computation needed.
+        Fast mode uses the longitude/latitude columns from the CSV and does not load the GeoJSON.
       </p>
     </div>
     """, unsafe_allow_html=True)
 
-    # Resolve the GeoJSON path: local file → cache → auto-download from URL
-    with st.expander("Advanced — GeoJSON source", expanded=False):
-        st.caption(
-            "By default, the app uses `communes.geojson` if present in the "
-            "project folder, otherwise downloads a simplified version "
-            "automatically. You only need to change this if you have a "
-            "custom GeoJSON elsewhere."
-        )
-        geojson_path = st.text_input(
-            "Custom GeoJSON path (optional)",
-            value=DEFAULT_GEOJSON,
-            help="Leave the default unless you have a custom file.",
-            key="map_geojson_path",
-        )
+    code_col = next(
+        (c for c in ("inseecommuneprinc", "code_insee", "INSEE_COM", "code")
+         if c in df.columns),
+        _find_insee_col(df),
+    )
 
-    resolved_path = _resolve_geojson_path(geojson_path)
-    if resolved_path is None:
-        st.stop()
-    geojson = _load_geojson(resolved_path)
-    centroids = _precompute_centroids(resolved_path)
-
-    if geojson is None:
-        st.warning(
-            f"GeoJSON could not be loaded from `{resolved_path}`."
-        )
-    elif centroids is None or len(centroids) == 0:
-        # Show a debug panel so the user can see what went wrong
+    if code_col is None:
         st.error(
-            "Could not extract commune centroids from the GeoJSON. "
-            "The Fast (points) mode requires this — switch to Detailed (polygons) for now."
+            "No INSEE code column found in the dataset. "
+            "Expected one of: `inseecommuneprinc`, `code_insee`, `INSEE_COM`, `code`."
         )
-        with st.expander("Debug — GeoJSON structure"):
-            sample = geojson["features"][0] if geojson.get("features") else {}
-            st.write("**First feature properties keys:**")
-            st.code(list((sample.get("properties") or {}).keys()))
-            st.write("**First feature properties (first 10):**")
-            st.code({k: v for k, v in (sample.get("properties") or {}).items()
-                     if k in list((sample.get("properties") or {}).keys())[:10]})
-            st.write("**Geometry type:**", sample.get("geometry", {}).get("type"))
-            st.write("**Top-level `id` field:**", sample.get("id", "(none)"))
-            st.info(
-                "Send me the keys above and I will adapt the centroid extraction "
-                "to your specific GeoJSON format."
-            )
     else:
-        # Identify INSEE code column in the dataframe
-        code_col = next(
-            (c for c in ("inseecommuneprinc", "code_insee", "INSEE_COM", "code")
-             if c in df.columns),
-            None,
-        )
-        if code_col is None:
-            st.error(
-                "No INSEE code column found in the dataset. "
-                "Expected one of: `inseecommuneprinc`, `code_insee`, `INSEE_COM`, `code`."
+        cfg = _param_config()
+        available_params = [c for c in num_cols if c in cfg or c.upper() in cfg]
+        if not available_params:
+            available_params = [c for c in num_cols if c not in {"longitude", "latitude", "Year", "Annee", "N_mesures"}]
+
+        chem_first = sorted([p for p in available_params if not _is_index_param(p)])
+        indices    = sorted([p for p in available_params if     _is_index_param(p)])
+        ordered_params = chem_first + indices
+
+        ctl_param, ctl_year, ctl_mode = st.columns([2, 2, 1.4])
+        with ctl_param:
+            map_param = st.selectbox(
+                "Parameter",
+                ordered_params,
+                index=ordered_params.index("CALCIUM") if "CALCIUM" in ordered_params else 0,
+                key="map_param",
+                format_func=pretty,
             )
-        else:
-            # Identify GeoJSON feature key
-            sample_props = geojson["features"][0].get("properties", {})
-            if "code" in sample_props:
-                feature_key = "properties.code"
-            elif "INSEE_COM" in sample_props:
-                feature_key = "properties.INSEE_COM"
-            elif "codgeo" in sample_props:
-                feature_key = "properties.codgeo"
-            else:
-                feature_key = "id"
 
-            # --- Controls ---
-            cfg = _param_config()
-            available_params = [c for c in num_cols if c in cfg or c.upper() in cfg]
-            chem_first = sorted([p for p in available_params if not _is_index_param(p)])
-            indices    = sorted([p for p in available_params if     _is_index_param(p)])
-            ordered_params = chem_first + indices
-
-            ctl_param, ctl_year, ctl_mode = st.columns([2, 2, 1.4])
-            with ctl_param:
-                map_param = st.selectbox(
-                    "Parameter",
-                    ordered_params,
-                    index=ordered_params.index("CALCIUM") if "CALCIUM" in ordered_params else 0,
-                    key="map_param",
-                    format_func=pretty,
-                )
-            with ctl_year:
-                if "Year" in df.columns:
-                    years = sorted(df["Year"].dropna().unique().astype(int))
-                    if len(years) > 1:
-                        map_year = st.select_slider(
-                            "Year",
-                            options=["All years"] + list(years),
-                            value=years[-1],
-                            key="map_year",
-                        )
-                        map_year = None if map_year == "All years" else int(map_year)
-                    else:
-                        map_year = int(years[0]) if years else None
-                        st.caption(f"Single year: {map_year}")
+        with ctl_year:
+            if "Year" in df.columns:
+                years = sorted(pd.to_numeric(df["Year"], errors="coerce").dropna().astype(int).unique())
+                if len(years) > 1:
+                    map_year = st.select_slider(
+                        "Year",
+                        options=["All years"] + list(years),
+                        value=years[-1],
+                        key="map_year",
+                    )
+                    map_year = None if map_year == "All years" else int(map_year)
                 else:
-                    map_year = None
-            with ctl_mode:
-                render_mode = st.radio(
-                    "Render",
-                    ["Fast (points)", "Detailed (polygons)"],
-                    index=0,
-                    key="map_mode",
-                    help="Fast = scatter on commune centroids (renders ~10× faster, "
-                         "best for interactive exploration). Detailed = full polygons "
-                         "(slower but prettier, use it for the final article figure).",
-                )
-
-            # --- Aggregate ---
-            df_key = f"{len(df)}_{map_param}_{map_year}_{iqr_factor}"
-            with st.spinner("Aggregating commune values..."):
-                agg = _aggregate_for_map(df_key, df, map_param, map_year, code_col)
-
-            if agg.empty:
-                st.warning("No data available for this parameter / year combination.")
+                    map_year = int(years[0]) if years else None
+                    st.caption(f"Single year: {map_year}")
             else:
-                # Normalize codes on both sides (strip, zfill, str)
-                agg = agg.copy()
-                agg["code"] = agg["code"].astype(str).str.strip().str.zfill(5)
-                cent = centroids.copy()
-                cent["code"] = cent["code"].astype(str).str.strip().str.zfill(5)
+                map_year = None
 
-                # Merge centroids on INSEE code (used for Fast mode)
-                agg_pts = agg.merge(cent, on="code", how="left").dropna(
-                    subset=["lon", "lat"]
+        with ctl_mode:
+            render_mode = st.radio(
+                "Render",
+                ["Fast (points)", "Detailed (polygons)"],
+                index=0,
+                key="map_mode",
+                help=(
+                    "Fast = points from CSV longitude/latitude, low RAM. "
+                    "Detailed = polygon choropleth, requires loading the GeoJSON."
+                ),
+            )
+
+        # GeoJSON is loaded only after the user explicitly selects polygon mode.
+        # Fast mode remains point-based and does not touch the polygon file.
+        geojson = None
+        feature_key = None
+        if render_mode.startswith("Detailed"):
+            with st.expander("Advanced — polygon GeoJSON source", expanded=False):
+                geojson_path = st.text_input(
+                    "Custom GeoJSON path",
+                    value=DEFAULT_GEOJSON,
+                    help="Use `communes_simplified.geojson` unless you have another file.",
+                    key="map_geojson_path",
+                )
+                load_polygon_data = st.checkbox(
+                    "Load polygon GeoJSON for this map",
+                    value=True,
+                    key="map_load_polygon_data",
+                    help="Loaded only in polygon mode. Keep Fast mode selected to avoid loading polygons.",
                 )
 
-                # Diagnostic if matching failed
-                n_unmatched = len(agg) - len(agg_pts)
-                if n_unmatched > 0 and len(agg_pts) == 0:
-                    st.error(
-                        f"None of the {len(agg):,} communes could be matched to the GeoJSON. "
-                        "This usually means the INSEE code format differs between your data "
-                        "and the GeoJSON file."
-                    )
-                    with st.expander("Debug info"):
-                        st.write("First 5 codes from your data:")
-                        st.code(agg["code"].head().tolist())
-                        st.write("First 5 codes from the GeoJSON:")
-                        st.code(cent["code"].head().tolist())
-                    st.stop()
-                elif n_unmatched > 0:
-                    st.caption(
-                        f"⚠️ {n_unmatched:,} communes could not be located in the GeoJSON "
-                        f"(matched {len(agg_pts):,}/{len(agg):,})"
-                    )
+            if load_polygon_data:
+                resolved_path = _resolve_geojson_path(geojson_path)
+                geojson = _load_geojson(resolved_path) if resolved_path is not None else None
+                if geojson is not None and geojson.get("features"):
+                    feature_key = _detect_geojson_feature_key(geojson)
+            else:
+                st.info("Polygon rendering is disabled for this run.")
 
-                # --- Color scale ---
-                cfg_p = cfg.get(map_param, {"label": map_param, "cmin": None, "cmax": None})
-                label = cfg_p["label"]
-                vals = agg["value"]
+        df_key = f"{len(df)}_{len(df.columns)}_{map_param}_{map_year}_{iqr_factor}"
+        with st.spinner("Aggregating commune values..."):
+            agg = _aggregate_for_map(df_key, df, map_param, map_year, code_col)
+            agg = _enrich_map_with_commune_names(agg)
+
+        if agg.empty:
+            st.warning("No data available for this parameter / year combination.")
+        else:
+            cfg_p = cfg.get(map_param, cfg.get(map_param.upper(), {"label": pretty(map_param), "cmin": None, "cmax": None}))
+            label = cfg_p.get("label", pretty(map_param))
+
+            vals = pd.to_numeric(agg["value"], errors="coerce").dropna()
+            if vals.empty:
+                st.warning("No numeric values available for this parameter / year combination.")
+            else:
                 lo, hi = vals.quantile(0.02), vals.quantile(0.98)
-                if cfg_p["cmin"] is not None: lo = max(lo, cfg_p["cmin"])
-                if cfg_p["cmax"] is not None: hi = min(hi, cfg_p["cmax"])
+                if pd.isna(lo) or pd.isna(hi) or lo == hi:
+                    lo, hi = vals.min(), vals.max()
+                if cfg_p.get("cmin") is not None:
+                    lo = max(float(lo), float(cfg_p["cmin"]))
+                if cfg_p.get("cmax") is not None:
+                    hi = min(float(hi), float(cfg_p["cmax"]))
+                if lo == hi:
+                    hi = lo + 1e-9
 
                 if _is_index_param(map_param):
                     z0 = _index_zero(map_param)
-                    span = max(abs(lo - z0), abs(hi - z0))
+                    span = max(abs(float(lo) - z0), abs(float(hi) - z0), 1e-9)
                     cmin, cmax, cmid = z0 - span, z0 + span, z0
                     colorscale = "RdBu_r"
                 else:
-                    cmin, cmax, cmid = lo, hi, None
+                    cmin, cmax, cmid = float(lo), float(hi), None
                     colorscale = "Viridis"
 
-                # --- KPI cards ---
                 k1, k2, k3 = st.columns(3)
                 k1.metric("Communes", f"{len(agg):,}")
                 k2.metric("Mean", f"{vals.mean():.2f}")
                 k3.metric("Median", f"{vals.median():.2f}")
 
-                # --- Build map ---
                 title_year = f"— {map_year}" if map_year else "— all years pooled"
-                title_text = (f"<b>{label}</b> {title_year}  ·  "
-                              f"N = {agg['n'].sum():,} measurements  ·  "
-                              f"{len(agg):,} communes")
+                title_text = (
+                    f"<b>{label}</b> {title_year}  ·  "
+                    f"N = {int(agg['n'].sum()):,} measurements  ·  "
+                    f"{len(agg):,} communes"
+                )
 
                 if render_mode.startswith("Fast"):
-                    # Scattergeo on centroids — much faster, no GeoJSON sent to browser
-                    with st.spinner(f"Rendering {len(agg_pts):,} points..."):
-                        # Pack everything for hover into customdata
-                        customdata = np.column_stack([
-                            agg_pts["code"].values,
-                            agg_pts["name"].fillna("").values,
-                            agg_pts["n"].values,
-                        ])
-                        fig = go.Figure(go.Scattergeo(
-                            lon=agg_pts["lon"].values,
-                            lat=agg_pts["lat"].values,
-                            mode="markers",
-                            marker=dict(
-                                size=4,
-                                color=agg_pts["value"].values,
+                    if not {"lon", "lat"}.issubset(agg.columns):
+                        st.error(
+                            "Fast mode requires `longitude` and `latitude` columns in the CSV."
+                        )
+                    else:
+                        plot_df = agg.copy()
+                        plot_df["lon"] = pd.to_numeric(plot_df["lon"], errors="coerce")
+                        plot_df["lat"] = pd.to_numeric(plot_df["lat"], errors="coerce")
+                        plot_df["value"] = pd.to_numeric(plot_df["value"], errors="coerce")
+                        plot_df = plot_df.dropna(subset=["lon", "lat", "value"])
+
+                        # Mainland France bounds. This also removes overseas points,
+                        # which otherwise make the map zoom out too far.
+                        mainland = plot_df[
+                            plot_df["lon"].between(-5.8, 10.0)
+                            & plot_df["lat"].between(41.0, 51.6)
+                        ].copy()
+
+                        if mainland.empty:
+                            st.error(
+                                "Fast map is empty because no rows have valid mainland `longitude`/`latitude`."
+                            )
+                            with st.expander("Debug coordinates"):
+                                st.write("Rows after aggregation:", len(agg))
+                                st.write("Rows with lon/lat/value:", len(plot_df))
+                                st.write("Longitude range:", (plot_df["lon"].min(), plot_df["lon"].max()) if len(plot_df) else None)
+                                st.write("Latitude range:", (plot_df["lat"].min(), plot_df["lat"].max()) if len(plot_df) else None)
+                        else:
+                            n_removed = len(plot_df) - len(mainland)
+                            if n_removed > 0:
+                                st.caption(f"{n_removed:,} points outside mainland France bounds were excluded from the fast map.")
+
+                            marker_kwargs = dict(
+                                size=6,
+                                color=mainland["value"],
                                 colorscale=colorscale,
-                                cmin=cmin, cmax=cmax, cmid=cmid,
+                                cmin=cmin,
+                                cmax=cmax,
                                 showscale=True,
-                                colorbar=dict(
-                                    title=dict(text=label, font=dict(size=12)),
-                                    thickness=14, len=0.7, x=1.02,
+                                colorbar=dict(title=dict(text=label), thickness=14, len=0.7, x=1.02),
+                                opacity=0.82,
+                            )
+                            if cmid is not None:
+                                marker_kwargs["cmid"] = cmid
+
+                            customdata = np.column_stack([
+                                mainland["name"].astype(str).values,
+                                mainland["code"].astype(str).values,
+                                mainland["n"].values,
+                                mainland["value"].values,
+                            ])
+
+                            fig = go.Figure(go.Scattermapbox(
+                                lon=mainland["lon"],
+                                lat=mainland["lat"],
+                                mode="markers",
+                                marker=marker_kwargs,
+                                customdata=customdata,
+                                hovertemplate=(
+                                    "<b>%{customdata[0]}</b><br>"
+                                    "INSEE %{customdata[1]}<br>"
+                                    f"{label}: " + "%{customdata[3]:.2f}<br>"
+                                    "Measurements: %{customdata[2]}<extra></extra>"
                                 ),
-                                line=dict(width=0),
-                            ),
-                            customdata=customdata,
-                            hovertemplate=(
-                                "<b>%{customdata[1]}</b> (INSEE %{customdata[0]})<br>"
-                                f"{label}: " + "%{marker.color:.2f}<br>"
-                                "Measurements: %{customdata[2]}<extra></extra>"
-                            ),
-                        ))
-                        fig.update_geos(
-                            visible=False,
-                            bgcolor="rgba(0,0,0,0)",
-                            showframe=False,
-                            showcoastlines=True,
-                            coastlinecolor="rgba(255,255,255,0.15)",
-                            showcountries=True,
-                            countrycolor="rgba(255,255,255,0.1)",
-                            projection=dict(type="mercator"),
-                            lonaxis=dict(range=[-5.5, 9.7]),  # mainland France bounds
-                            lataxis=dict(range=[41.0, 51.5]),
-                        )
-                        fig.update_layout(
-                            title=title_text,
-                            height=720,
-                            margin=dict(l=0, r=0, t=50, b=0),
-                        )
+                            ))
+                            fig.update_layout(
+                                title=title_text,
+                                height=720,
+                                margin=dict(l=0, r=0, t=50, b=0),
+                                mapbox=dict(
+                                    style="carto-darkmatter",
+                                    center=dict(lat=46.6, lon=2.4),
+                                    zoom=4.7,
+                                ),
+                            )
+                            mainland = mainland.reset_index(drop=True)
+                            clicked = _render_plotly_with_click(
+                                fig,
+                                key=f"map_click_fast_{map_param}_{map_year}",
+                            )
+                            insee_clicked = _extract_clicked_insee(clicked, {0: mainland})
+                            if insee_clicked is not None:
+                                st.session_state["map_selected_insee"] = insee_clicked
+
+                            stored_insee = st.session_state.get("map_selected_insee")
+                            if stored_insee:
+                                lookup = mainland.copy()
+                                lookup["code"] = lookup["code"].astype(str).str.zfill(5)
+                                m_sel = lookup[lookup["code"].eq(str(stored_insee).zfill(5))]
+                                selected_row = m_sel.iloc[0] if not m_sel.empty else None
+                                _show_clicked_commune_profile(
+                                    df, code_col, str(stored_insee), selected_row, label, num_cols
+                                )
+                                if st.button("Clear selected commune", key="map_clear_selected_commune_fast"):
+                                    st.session_state.pop("map_selected_insee", None)
+                                    st.rerun()
+                            else:
+                                st.caption("Click on a commune point to display the full water profile.")
+
                 else:
-                    # Choropleth (slow but pretty)
-                    with st.spinner(f"Rendering polygons for {len(agg):,} communes..."):
+                    if geojson is None or feature_key is None:
+                        st.warning("Polygon map not rendered because the GeoJSON is not loaded.")
+                    else:
                         fig = go.Figure(go.Choropleth(
                             geojson=geojson,
                             locations=agg["code"],
                             featureidkey=feature_key,
                             z=agg["value"],
-                            zmin=cmin, zmax=cmax, zmid=cmid,
+                            zmin=cmin,
+                            zmax=cmax,
+                            zmid=cmid,
                             colorscale=colorscale,
                             marker_line_width=0,
-                            customdata=np.column_stack([agg["n"].values]),
+                            customdata=np.column_stack([
+                                agg["name"].astype(str).values,
+                                agg["n"].values,
+                            ]),
                             hovertemplate=(
-                                "<b>INSEE %{location}</b><br>"
+                                "<b>%{customdata[0]}</b><br>"
+                                "INSEE %{location}<br>"
                                 f"{label}: " + "%{z:.2f}<br>"
-                                "Measurements: %{customdata[0]}<extra></extra>"
+                                "Measurements: %{customdata[1]}<extra></extra>"
                             ),
                             colorbar=dict(
                                 title=dict(text=label, font=dict(size=12)),
-                                thickness=14, len=0.7, x=1.02,
+                                thickness=14,
+                                len=0.7,
+                                x=1.02,
                             ),
                         ))
+                        point_df = pd.DataFrame()
+                        if {"lon", "lat"}.issubset(agg.columns):
+                            point_df = agg.copy()
+                            point_df["lon"] = pd.to_numeric(point_df["lon"], errors="coerce")
+                            point_df["lat"] = pd.to_numeric(point_df["lat"], errors="coerce")
+                            point_df["value"] = pd.to_numeric(point_df["value"], errors="coerce")
+                            point_df = point_df.dropna(subset=["lon", "lat", "value"])
+                            point_df = point_df[
+                                point_df["lon"].between(-5.8, 10.0)
+                                & point_df["lat"].between(41.0, 51.6)
+                            ].reset_index(drop=True)
+                            if not point_df.empty:
+                                fig.add_trace(go.Scattergeo(
+                                    lon=point_df["lon"],
+                                    lat=point_df["lat"],
+                                    mode="markers",
+                                    marker=dict(
+                                        size=4,
+                                        color="rgba(250,250,250,0.35)",
+                                        line=dict(width=0),
+                                    ),
+                                    customdata=np.column_stack([point_df["code"].astype(str).values]),
+                                    hovertemplate=(
+                                        "<b>Click to inspect</b><br>"
+                                        "INSEE %{customdata[0]}<extra></extra>"
+                                    ),
+                                    showlegend=False,
+                                ))
+
                         fig.update_geos(
                             fitbounds="locations",
                             visible=False,
@@ -2370,192 +2767,192 @@ with tab_map:
                                 center=dict(lat=46.5, lon=2.5),
                             ),
                         )
+                        trace_lookup = {0: agg.reset_index(drop=True)}
+                        if "point_df" in locals() and not point_df.empty:
+                            trace_lookup[1] = point_df
 
-                # Render the map with click handling. plotly_events returns
-                # a list of clicked points (curveNumber, pointIndex, x, y...).
-                # Falls back to a regular plotly chart if the package is
-                # not installed.
-                clicked = None
-                try:
-                    from streamlit_plotly_events import plotly_events
-                    clicked = plotly_events(
-                        fig,
-                        click_event=True,
-                        hover_event=False,
-                        select_event=False,
-                        override_height=720,
-                        override_width="100%",
-                        key=f"map_click_{map_param}_{map_year}_{render_mode}",
-                    )
-                except ImportError:
-                    st.plotly_chart(fig, use_container_width=True)
-                    st.caption(
-                        "💡 Install `streamlit-plotly-events` to enable "
-                        "click-to-inspect on the map: "
-                        "`pip install streamlit-plotly-events`"
-                    )
-
-                # --- Click-to-inspect panel ---
-                if clicked:
-                    pt_idx = clicked[0].get("pointIndex")
-                    if pt_idx is not None and render_mode.startswith("Fast"):
-                        if 0 <= pt_idx < len(agg_pts):
-                            row_clicked = agg_pts.iloc[pt_idx]
-                            insee_clicked = str(row_clicked["code"]).zfill(5)
-                            name_clicked  = row_clicked["name"] or "(unknown)"
-                            insee_main = _find_insee_col(df)
-                            mask_c = df[insee_main].astype(str).str.strip().str.zfill(5) == insee_clicked if insee_main else pd.Series([False] * len(df))
-                            sub_c = df[mask_c]
-
-                            st.markdown("---")
-                            st.markdown(f"""
-                            <div style='background: var(--bg-card); border: 1px solid var(--accent);
-                                        border-radius: 12px; padding: 1.25rem 1.5rem;
-                                        margin: 0.5rem 0 1rem 0; backdrop-filter: blur(12px);
-                                        box-shadow: 0 0 24px rgba(167, 139, 250, 0.1);'>
-                              <div style='display: flex; align-items: baseline;
-                                          justify-content: space-between; margin-bottom: 0.5rem;'>
-                                <div>
-                                  <div style='font-size: 11px; color: #a78bfa;
-                                              font-weight: 600; letter-spacing: 0.12em;
-                                              text-transform: uppercase;'>Selected commune</div>
-                                  <div style='font-size: 1.4rem; font-weight: 700;
-                                              color: #fafafa; letter-spacing: -0.02em;
-                                              margin-top: 0.2rem;'>{name_clicked}</div>
-                                  <div style='font-size: 12px; color: #71717a;
-                                              font-family: JetBrains Mono, monospace;'>INSEE {insee_clicked}</div>
-                                </div>
-                                <div style='text-align: right; font-size: 12px; color: #a1a1aa;'>
-                                  <div><b style='color: #fafafa;'>{row_clicked['value']:.2f}</b> — {label}</div>
-                                  <div>{int(row_clicked['n'])} measurement(s)</div>
-                                </div>
-                              </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-
-                            cd_chem, cd_idx, cd_geo = st.columns([3, 2, 2])
-
-                            with cd_chem:
-                                st.markdown("**Water composition**")
-                                chem_p = [c for c in ["CALCIUM", "MAGNESIUM", "MAGNÉSIUM",
-                                                      "HYDROGENOCARBONATES", "HYDROGÉNOCARBONATES",
-                                                      "SULFATES", "CHLORURES", "SODIUM",
-                                                      "POTASSIUM", "PH ", "PH"]
-                                          if c in num_cols and c in sub_c.columns]
-                                seen = set()
-                                rows_c = []
-                                for p in chem_p:
-                                    pn = pretty(p)
-                                    if pn in seen: continue
-                                    seen.add(pn)
-                                    v = sub_c[p].mean()
-                                    if pd.isna(v): continue
-                                    rows_c.append({"Parameter": pn, "Value": f"{v:.2f}"})
-                                if rows_c:
-                                    st.dataframe(pd.DataFrame(rows_c),
-                                                 hide_index=True,
-                                                 use_container_width=True)
-
-                            with cd_idx:
-                                st.markdown("**Indices**")
-                                for p in ["IL", "ryznar", "Larson", "Bason"]:
-                                    if p not in sub_c.columns: continue
-                                    v = sub_c[p].mean()
-                                    if pd.isna(v): continue
-                                    st.metric(pretty(p), f"{v:.2f}")
-
-                            with cd_geo:
-                                st.markdown("**Geological context**")
-                                if "geological_zone" in sub_c.columns:
-                                    gz = sub_c["geological_zone"].mode()
-                                    if len(gz):
-                                        st.markdown(f"**Zone:** {gz.iloc[0]}")
-                                if "LITHO_SIMP" in sub_c.columns:
-                                    lt = sub_c["LITHO_SIMP"].mode()
-                                    if len(lt):
-                                        st.markdown(f"**Lithology:** {lt.iloc[0]}")
-                                for grade_col, lbl in [("Langelier_grade", "Langelier"),
-                                                        ("Ryznar_grade", "Ryznar"),
-                                                        ("Larson_grade", "Larson"),
-                                                        ("Bason_grade", "Basson")]:
-                                    if grade_col in sub_c.columns:
-                                        g = sub_c[grade_col].mode()
-                                        if len(g):
-                                            st.caption(f"{lbl} grade: **{g.iloc[0]}**")
-                else:
-                    st.caption("💡 Click on any point on the map to see the full water profile of that commune.")
-
-                # --- Bottom panel : top extreme communes + download ---
-                bot_l, bot_r = st.columns([3, 1])
-                with bot_l:
-                    with st.expander("Top 10 communes — highest values"):
-                        top_high = (
-                            agg_pts.nlargest(10, "value")
-                                   .reset_index(drop=True)
-                                   .rename(columns={"code": "INSEE",
-                                                    "name": "Commune",
-                                                    "value": label,
-                                                    "n": "N measurements"})
-                                   [["INSEE", "Commune", label, "N measurements"]]
+                        clicked = _render_plotly_with_click(
+                            fig,
+                            key=f"map_click_poly_{map_param}_{map_year}",
                         )
-                        st.dataframe(top_high, use_container_width=True, hide_index=True)
-                    with st.expander("Top 10 communes — lowest values"):
-                        top_low = (
-                            agg_pts.nsmallest(10, "value")
-                                   .reset_index(drop=True)
-                                   .rename(columns={"code": "INSEE",
-                                                    "name": "Commune",
-                                                    "value": label,
-                                                    "n": "N measurements"})
-                                   [["INSEE", "Commune", label, "N measurements"]]
-                        )
-                        st.dataframe(top_low, use_container_width=True, hide_index=True)
-                with bot_r:
-                    st.markdown("**Export**")
-                    st.download_button(
-                        "Download map (HTML)",
-                        fig.to_html(include_plotlyjs="cdn").encode("utf-8"),
-                        file_name=f"map_{map_param}_{map_year or 'all'}.html",
-                        mime="text/html",
-                    )
-                    st.download_button(
-                        "Download data (CSV)",
-                        agg_pts.to_csv(index=False).encode("utf-8"),
-                        file_name=f"map_{map_param}_{map_year or 'all'}.csv",
-                        mime="text/csv",
+                        insee_clicked = _extract_clicked_insee(clicked, trace_lookup)
+                        if insee_clicked is not None:
+                            st.session_state["map_selected_insee"] = insee_clicked
+
+                        stored_insee = st.session_state.get("map_selected_insee")
+                        if stored_insee:
+                            lookup = agg.copy()
+                            lookup["code"] = lookup["code"].astype(str).str.zfill(5)
+                            m_sel = lookup[lookup["code"].eq(str(stored_insee).zfill(5))]
+                            selected_row = m_sel.iloc[0] if not m_sel.empty else None
+                            _show_clicked_commune_profile(
+                                df, code_col, str(stored_insee), selected_row, label, num_cols
+                            )
+                            if st.button("Clear selected commune", key="map_clear_selected_commune_poly"):
+                                st.session_state.pop("map_selected_insee", None)
+                                st.rerun()
+                        else:
+                            st.caption("Click on a commune point to display the full water profile. The small white points are the clickable layer over the polygons.")
+
+                with st.expander("Top 10 communes — highest values"):
+                    st.dataframe(
+                        agg.sort_values("value", ascending=False).head(10),
+                        use_container_width=True,
                     )
 
+                with st.expander("Top 10 communes — lowest values"):
+                    st.dataframe(
+                        agg.sort_values("value", ascending=True).head(10),
+                        use_container_width=True,
+                    )
 
-# ============================================================================
-# Tab 0 : Commune — search a city and display its full water profile
-# ============================================================================
+                st.download_button(
+                    "Download map data (CSV)",
+                    agg.to_csv(index=False).encode("utf-8"),
+                    file_name=f"map_{map_param}_{map_year or 'all'}.csv",
+                    mime="text/csv",
+                )
 
-@st.cache_data(show_spinner=False)
-def _build_commune_index(_df: pd.DataFrame) -> pd.DataFrame:
+
+def _normalize_commune_text(value: object) -> str:
+    """Normalise names for fast search: lowercase, accents removed, punctuation collapsed."""
+    import re
+    import unicodedata
+
+    txt = "" if value is None else str(value)
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    txt = re.sub(r"[^0-9a-zA-Z]+", " ", txt).lower().strip()
+    return re.sub(r"\s+", " ", txt)
+
+
+@st.cache_data(show_spinner=False, max_entries=5)
+def _build_commune_index_from_pairs(
+    pairs: tuple[tuple[str, str], ...],
+    geo_pairs: tuple[tuple[str, str], ...] = (),
+) -> pd.DataFrame:
+    """Build a compact commune index, enriched with names recovered from the GeoJSON."""
+    if not pairs:
+        return pd.DataFrame()
+
+    df_idx = pd.DataFrame(pairs, columns=["_insee", "_name"])
+    df_idx["_insee"] = df_idx["_insee"].astype(str).str.strip().str.zfill(5)
+    df_idx["_name"] = df_idx["_name"].astype(str).str.strip()
+    df_idx = df_idx.drop_duplicates(subset=["_insee"]).copy()
+
+    if geo_pairs:
+        geo = pd.DataFrame(geo_pairs, columns=["_insee", "_geo_name"])
+        geo["_insee"] = geo["_insee"].astype(str).str.strip().str.zfill(5)
+        geo["_geo_name"] = geo["_geo_name"].astype(str).str.strip()
+        geo = geo.drop_duplicates(subset=["_insee"])
+        df_idx = df_idx.merge(geo, on="_insee", how="left")
+
+        missing_or_dummy = (
+            df_idx["_name"].eq("") |
+            df_idx["_name"].str.match(r"^INSEE\s+", case=False, na=False)
+        )
+        df_idx.loc[missing_or_dummy & df_idx["_geo_name"].notna(), "_name"] = (
+            df_idx.loc[missing_or_dummy & df_idx["_geo_name"].notna(), "_geo_name"]
+        )
+        df_idx = df_idx.drop(columns=["_geo_name"])
+
+    df_idx["_name"] = df_idx["_name"].replace("", pd.NA).fillna("INSEE " + df_idx["_insee"])
+    df_idx["label"] = df_idx["_name"] + " (" + df_idx["_insee"] + ")"
+
+    df_idx["_name_norm"] = df_idx["_name"].map(_normalize_commune_text)
+    df_idx["_name_compact"] = df_idx["_name_norm"].str.replace(" ", "", regex=False)
+    df_idx["_search"] = df_idx["_name_norm"] + " " + df_idx["_name_compact"] + " " + df_idx["_insee"]
+
+    return df_idx.sort_values(["_name_norm", "_insee"]).reset_index(drop=True)
+
+
+def _commune_geo_pairs() -> tuple[tuple[str, str], ...]:
+    """Return (INSEE, commune name) pairs without loading GeoJSON geometries.
+
+    The previous version called _precompute_centroids(), which parsed all
+    polygon coordinates just to recover names. That is expensive in RAM.
+    This version builds/uses a tiny CSV cache: .cache/communes_names.csv.
     """
-    Build a small index (one row per commune) for the autocomplete search.
-    Auto-detects the INSEE code and name columns.
-    Returns an empty DataFrame if neither is found.
-    """
-    insee_col = _find_insee_col(_df)
-    name_col  = _find_name_col(_df)
+    cache = Path(COMMUNE_NAMES_CACHE)
+    for cache_candidate in (Path("communes_names.csv"), cache):
+        if cache_candidate.exists() and cache_candidate.stat().st_size > 1000:
+            try:
+                names = pd.read_csv(cache_candidate, dtype={"code": "string", "name": "string"})
+                names = names.dropna(subset=["code"]).drop_duplicates(subset=["code"])
+                return tuple(zip(names["code"].astype(str), names["name"].fillna("").astype(str)))
+            except Exception:
+                pass
+    resolved = _resolve_geojson_path(DEFAULT_GEOJSON, show_errors=False)
+    if not resolved:
+        return ()
+
+    import re
+    try:
+        text = Path(resolved).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ()
+
+    pattern = re.compile(r'"properties"\s*:\s*\{[^}]*"code"\s*:\s*"([^"]+)"[^}]*"nom"\s*:\s*"([^"]*)"')
+    rows = [(m.group(1).strip().zfill(5), m.group(2).strip()) for m in pattern.finditer(text)]
+    if not rows:
+        return ()
+
+    names = pd.DataFrame(rows, columns=["code", "name"]).drop_duplicates(subset=["code"])
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        names.to_csv(cache, index=False)
+    except Exception:
+        pass
+    return tuple(zip(names["code"].astype(str), names["name"].astype(str)))
+def _build_commune_index(df: pd.DataFrame) -> pd.DataFrame:
+    """Build one searchable row per commune."""
+    insee_col = _find_insee_col(df)
+    name_col = _find_name_col(df)
     if insee_col is None:
         return pd.DataFrame()
-    cols = [insee_col] + ([name_col] if name_col else [])
-    idx = (
-        _df[cols]
-        .drop_duplicates(subset=[insee_col])
-        .dropna(subset=[insee_col])
-        .copy()
-    )
-    idx["_insee"] = idx[insee_col].astype(str).str.strip().str.zfill(5)
+
     if name_col:
-        idx["_name"] = idx[name_col].astype(str)
+        pairs_df = df[[insee_col, name_col]].dropna(subset=[insee_col]).drop_duplicates(subset=[insee_col])
+        pairs = tuple(zip(pairs_df[insee_col].astype(str), pairs_df[name_col].astype(str)))
     else:
-        idx["_name"] = "INSEE " + idx["_insee"]
-    idx["label"] = idx["_name"] + " (" + idx["_insee"] + ")"
-    idx = idx.sort_values("_name").reset_index(drop=True)
-    return idx[["_insee", "_name", "label"]]
+        pairs_df = df[[insee_col]].dropna().drop_duplicates()
+        pairs = tuple((str(v), f"INSEE {v}") for v in pairs_df[insee_col])
+
+    return _build_commune_index_from_pairs(pairs, _commune_geo_pairs())
+
+
+def _filter_communes(commune_idx: pd.DataFrame, query: str, limit: int = 50) -> pd.DataFrame:
+    """Return a small ranked list of matches instead of sending ~35k options to the browser."""
+    q = _normalize_commune_text(query)
+    q_compact = q.replace(" ", "")
+    if not q and not q_compact:
+        return commune_idx.head(0)
+
+    mask = (
+        commune_idx["_search"].str.contains(q, regex=False, na=False) |
+        commune_idx["_name_compact"].str.contains(q_compact, regex=False, na=False) |
+        commune_idx["_insee"].str.contains(q, regex=False, na=False)
+    )
+    out = commune_idx.loc[mask].copy()
+    if out.empty:
+        return out
+
+    out["_rank"] = np.select(
+        [
+            out["_insee"].eq(q),
+            out["_name_norm"].str.startswith(q, na=False),
+            out["_name_compact"].str.startswith(q_compact, na=False),
+        ],
+        [0, 1, 2],
+        default=3,
+    )
+    return out.sort_values(["_rank", "_name_norm", "_insee"]).head(limit)
+
+
+@st.cache_data(show_spinner=False, max_entries=5)
+def _normalised_insee_series(values: tuple[object, ...]) -> pd.Series:
+    """Cache the normalised INSEE vector used for subsetting selected communes."""
+    return pd.Series(values, dtype="object").astype(str).str.strip().str.zfill(5)
 
 
 with tab_commune:
@@ -2567,8 +2964,7 @@ with tab_commune:
       </div>
       <h2 style='margin-top: 0 !important;'>Search a French commune</h2>
       <p style='color: #a1a1aa; font-size: 13px; margin: 0.25rem 0 0 0;'>
-        Find any commune by name, see its full water composition, aggressiveness
-        indices, geological context and how it compares to the national average.
+        Search is limited to the best matches instead of rendering the full commune list.
       </p>
     </div>
     """, unsafe_allow_html=True)
@@ -2576,7 +2972,7 @@ with tab_commune:
     commune_idx = _build_commune_index(df)
     insee_col_main = _find_insee_col(df)
 
-    if commune_idx.empty:
+    if commune_idx.empty or insee_col_main is None:
         st.warning(
             "Cannot build the commune search: the dataset has no recognizable "
             "INSEE code column."
@@ -2584,46 +2980,56 @@ with tab_commune:
         with st.expander("Debug — dataset columns"):
             st.write("**Columns in the dataset:**")
             st.code(list(df.columns))
-            st.caption(
-                "Send these column names back if you want me to add support for them. "
-                "Expected one of: inseecommuneprinc, code_insee, INSEE_COM, code, insee."
-            )
+            st.caption("Expected one of: inseecommuneprinc, code_insee, INSEE_COM, code, insee.")
     else:
-        # --- Searchable selectbox (Streamlit's selectbox already supports type-to-search) ---
-        selected_label = st.selectbox(
-            f"Search among {len(commune_idx):,} communes",
-            options=commune_idx["label"].tolist(),
-            index=None,
-            placeholder="Start typing a commune name (e.g. 'Lyon', 'Saint-Pont'...)",
-            key="commune_search",
-        )
-
-        if selected_label is None:
-            st.info("Type the first letters of any French commune in the box above to begin.")
-        else:
-            row = commune_idx[commune_idx["label"] == selected_label].iloc[0]
-            insee = row["_insee"]
-            name  = row["_name"]
-
-            # Subset of all measurements for this commune
-            mask = df[insee_col_main].astype(str).str.strip().str.zfill(5) == insee
-            sub  = df[mask]
-
-            # ---------- Header card ----------
-            n_records = len(sub)
-            years_present = (
-                sorted(sub["Year"].dropna().unique().astype(int).tolist())
-                if "Year" in sub.columns else []
+        q_col, n_col = st.columns([3, 1])
+        with q_col:
+            commune_query = st.text_input(
+                "Commune name or INSEE code",
+                placeholder="Example: Lyon, Saint-Étienne, 31555...",
+                key="commune_query",
             )
+        with n_col:
+            max_results = st.number_input(
+                "Max results", min_value=10, max_value=200, value=50, step=10, key="commune_max_results"
+            )
+
+        matches = _filter_communes(commune_idx, commune_query, int(max_results)) if commune_query else commune_idx.head(0)
+
+        if not commune_query:
+            st.info("Type at least part of a commune name or an INSEE code to search.")
+        elif matches.empty:
+            st.warning("No commune found for this search.")
+        else:
+            labels_by_code = dict(zip(matches["_insee"], matches["label"]))
+            selected_insee = st.selectbox(
+                f"Results ({len(matches)} shown / {len(commune_idx):,} communes indexed)",
+                options=matches["_insee"].tolist(),
+                format_func=lambda code: labels_by_code.get(code, code),
+                index=0,
+                key="commune_result",
+            )
+
+            row = matches.loc[matches["_insee"] == selected_insee].iloc[0]
+            insee = row["_insee"]
+            name = row["_name"]
+
+            if "_insee_norm" in df.columns and insee_col_main == "inseecommuneprinc":
+                mask = df["_insee_norm"].eq(insee).to_numpy()
+            else:
+                insee_norm = _normalised_insee_series(tuple(df[insee_col_main].to_numpy()))
+                mask = insee_norm.eq(insee).to_numpy()
+            sub = df.loc[mask]
+
+            n_records = len(sub)
+            years_present = sorted(sub["Year"].dropna().unique().astype(int).tolist()) if "Year" in sub.columns else []
             geo_zone = (
                 sub["geological_zone"].mode().iloc[0]
-                if "geological_zone" in sub.columns and not sub["geological_zone"].isna().all()
-                else None
+                if "geological_zone" in sub.columns and not sub["geological_zone"].isna().all() else None
             )
             litho = (
                 sub["LITHO_SIMP"].mode().iloc[0]
-                if "LITHO_SIMP" in sub.columns and not sub["LITHO_SIMP"].isna().all()
-                else None
+                if "LITHO_SIMP" in sub.columns and not sub["LITHO_SIMP"].isna().all() else None
             )
 
             st.markdown(f"""
@@ -2646,10 +3052,8 @@ with tab_commune:
             </div>
             """, unsafe_allow_html=True)
 
-            # ---------- Two-column layout: composition + indices ----------
             col_chem, col_idx = st.columns([3, 2])
 
-            # --- Chemistry panel ---
             with col_chem:
                 st.markdown("##### Water composition")
                 chem_params = [c for c in ["CALCIUM", "MAGNESIUM", "MAGNÉSIUM",
@@ -2658,7 +3062,6 @@ with tab_commune:
                                            "NITRATES (EN NO3)", "PH ", "PH",
                                            "TEMPÉRATURE DE L'EAU", "TEMPERATURE DE L'EAU"]
                                if c in num_cols and c in sub.columns]
-                # Deduplicate by pretty name (keep first)
                 seen_pretty = set()
                 rows = []
                 for p in chem_params:
@@ -2679,69 +3082,51 @@ with tab_commune:
                         "Δ vs France": f"{delta:+.2f} ({delta_pct:+.0f}%)",
                     })
                 if rows:
-                    st.dataframe(pd.DataFrame(rows), hide_index=True,
-                                 use_container_width=True)
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
                 else:
                     st.caption("No chemistry data available for this commune.")
 
-            # --- Indices panel ---
             with col_idx:
                 st.markdown("##### Aggressiveness indices")
-                index_params = [c for c in ["IL", "IL_calc", "ryznar", "Larson", "Bason"]
-                                if c in num_cols and c in sub.columns]
+                index_params = [c for c in ["IL", "IL_calc", "ryznar", "Larson", "Bason"] if c in num_cols and c in sub.columns]
                 for p in index_params:
                     val = sub[p].mean()
                     nat = df[p].mean()
                     if pd.isna(val):
                         continue
                     delta = val - nat if not pd.isna(nat) else None
-                    # Find a categorical grade if available
                     grade_col = {"IL": "Langelier_grade", "ryznar": "Ryznar_grade",
                                  "Larson": "Larson_grade", "Bason": "Bason_grade"}.get(p)
                     grade = (sub[grade_col].mode().iloc[0]
-                             if grade_col and grade_col in sub.columns
-                             and not sub[grade_col].isna().all() else None)
-                    st.metric(
-                        pretty(p),
-                        f"{val:.2f}",
-                        delta=f"{delta:+.2f} vs France" if delta is not None else None,
-                        delta_color="off",
-                        help=f"Grade: **{grade}**" if grade else None,
-                    )
+                             if grade_col and grade_col in sub.columns and not sub[grade_col].isna().all() else None)
+                    st.metric(pretty(p), f"{val:.2f}",
+                              delta=f"{delta:+.2f} vs France" if delta is not None else None,
+                              delta_color="off", help=f"Grade: **{grade}**" if grade else None)
 
-            # ---------- Mini map ----------
-            cent = _precompute_centroids(geojson_path) if 'geojson_path' in dir() else None
-            if cent is None:
-                # Try resolving without the user setting (Maps tab might not be open yet)
-                resolved = _resolve_geojson_path(DEFAULT_GEOJSON)
-                if resolved:
-                    cent = _precompute_centroids(resolved)
-            if cent is not None and len(cent):
-                cent_norm = cent.copy()
-                cent_norm["code"] = cent_norm["code"].astype(str).str.zfill(5)
-                m = cent_norm[cent_norm["code"] == insee]
-                if not m.empty:
-                    row_c = m.iloc[0]
-                    st.markdown("##### Location")
-                    fig_loc = go.Figure(go.Scattergeo(
-                        lon=[row_c["lon"]],
-                        lat=[row_c["lat"]],
-                        mode="markers",
-                        marker=dict(size=14, color="#a78bfa",
-                                    line=dict(color="#fafafa", width=2)),
-                        hovertemplate=f"<b>{name}</b><br>INSEE {insee}<extra></extra>",
-                    ))
-                    fig_loc.update_geos(
-                        visible=False,
-                        bgcolor="rgba(0,0,0,0)",
-                        showframe=False,
-                        showcoastlines=True,
-                        coastlinecolor="rgba(255,255,255,0.15)",
-                        showcountries=True,
-                        countrycolor="rgba(255,255,255,0.1)",
-                        projection=dict(type="mercator"),
-                        lonaxis=dict(range=[-5.5, 9.7]),
-                        lataxis=dict(range=[41.0, 51.5]),
-                    )
-                    fig_loc.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0))
-                    st.plotly_chart(fig_loc, use_container_width=True)
+            show_location = st.checkbox("Show location map", value=False, key="commune_show_location")
+            if show_location:
+                resolved = _resolve_geojson_path(DEFAULT_GEOJSON, show_errors=False)
+                cent = _precompute_centroids(resolved) if resolved else None
+                if cent is not None and len(cent):
+                    cent_norm = cent.copy()
+                    cent_norm["code"] = cent_norm["code"].astype(str).str.zfill(5)
+                    m = cent_norm[cent_norm["code"] == insee]
+                    if not m.empty:
+                        row_c = m.iloc[0]
+                        st.markdown("##### Location")
+                        fig_loc = go.Figure(go.Scattergeo(
+                            lon=[row_c["lon"]], lat=[row_c["lat"]], mode="markers",
+                            marker=dict(size=14, color="#a78bfa", line=dict(color="#fafafa", width=2)),
+                            hovertemplate=f"<b>{name}</b><br>INSEE {insee}<extra></extra>",
+                        ))
+                        fig_loc.update_geos(
+                            visible=False, bgcolor="rgba(0,0,0,0)", showframe=False,
+                            showcoastlines=True, coastlinecolor="rgba(255,255,255,0.15)",
+                            showcountries=True, countrycolor="rgba(255,255,255,0.1)",
+                            projection=dict(type="mercator"), lonaxis=dict(range=[-5.5, 9.7]),
+                            lataxis=dict(range=[41.0, 51.5]),
+                        )
+                        fig_loc.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0))
+                        st.plotly_chart(fig_loc, use_container_width=True)
+                else:
+                    st.caption("No GeoJSON available for the location map.")
