@@ -42,7 +42,7 @@ import plotly.io as pio
 
 
 # ---------------------------------------------------------------------------
-# Plotly theme
+# Premium Plotly theme
 # ---------------------------------------------------------------------------
 
 pio.templates["sise"] = pio.templates["plotly_dark"]
@@ -1693,8 +1693,60 @@ with tab_3d:
 # Tab 7 : Maps (choropleth on French communes)
 # ============================================================================
 
-# Default candidate path for the communes GeoJSON in the project root
+# Where the GeoJSON lives. The app tries, in order:
+#   1) The local file at DEFAULT_GEOJSON (typically your dev machine)
+#   2) The cached download at CACHE_GEOJSON (after a previous auto-download)
+#   3) Download from GEOJSON_URL and cache it (for cloud deployment)
+#
+# Replace GEOJSON_URL with your own GitHub Release URL once you upload the
+# simplified file. The placeholder below points to a popular public mirror
+# of the same data (Etalab, ~14 MB).
 DEFAULT_GEOJSON = "communes.geojson"
+CACHE_GEOJSON   = ".cache/communes.geojson"
+GEOJSON_URL     = (
+    "https://github.com/gregoiredavid/france-geojson/raw/master/"
+    "communes-version-simplifiee.geojson"
+)
+
+
+def _resolve_geojson_path(user_path: str) -> str | None:
+    """
+    Resolve the GeoJSON path with the following priority:
+      1. The user-provided path, if the file exists locally
+      2. The internal cache file, if it exists
+      3. Download from GEOJSON_URL into the cache, then return the cache path
+
+    Returns None if all three strategies fail (no local file, no cache, no
+    network).
+    """
+    import urllib.request, urllib.error
+
+    # 1) User-provided local path
+    if user_path and Path(user_path).exists():
+        return user_path
+
+    # 2) Internal cache from a previous download
+    cache = Path(CACHE_GEOJSON)
+    if cache.exists() and cache.stat().st_size > 100_000:
+        return str(cache)
+
+    # 3) Download once
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with st.spinner(
+            f"First-time setup: downloading commune boundaries from "
+            f"{GEOJSON_URL.split('/')[2]}... (~15 MB, one-time only)"
+        ):
+            urllib.request.urlretrieve(GEOJSON_URL, cache)
+        return str(cache)
+    except (urllib.error.URLError, OSError) as e:
+        st.error(
+            f"Could not download the communes GeoJSON.\n\n"
+            f"**Error:** `{e}`\n\n"
+            f"To fix: place a `communes.geojson` file at the project root, "
+            f"or check your network connection."
+        )
+        return None
 
 
 @st.cache_resource(show_spinner=False)
@@ -1901,20 +1953,30 @@ with tab_map:
     </div>
     """, unsafe_allow_html=True)
 
-    geojson_path = st.text_input(
-        "Communes GeoJSON path",
-        DEFAULT_GEOJSON,
-        help="Path to the GeoJSON of French communes (download once from "
-             "https://github.com/gregoiredavid/france-geojson).",
-        key="map_geojson_path",
-    )
-    geojson = _load_geojson(geojson_path)
-    centroids = _precompute_centroids(geojson_path)
+    # Resolve the GeoJSON path: local file → cache → auto-download from URL
+    with st.expander("Advanced — GeoJSON source", expanded=False):
+        st.caption(
+            "By default, the app uses `communes.geojson` if present in the "
+            "project folder, otherwise downloads a simplified version "
+            "automatically. You only need to change this if you have a "
+            "custom GeoJSON elsewhere."
+        )
+        geojson_path = st.text_input(
+            "Custom GeoJSON path (optional)",
+            value=DEFAULT_GEOJSON,
+            help="Leave the default unless you have a custom file.",
+            key="map_geojson_path",
+        )
+
+    resolved_path = _resolve_geojson_path(geojson_path)
+    if resolved_path is None:
+        st.stop()
+    geojson = _load_geojson(resolved_path)
+    centroids = _precompute_centroids(resolved_path)
 
     if geojson is None:
         st.warning(
-            f"GeoJSON not found at `{geojson_path}`. "
-            "Download the communes GeoJSON and put it in the project root."
+            f"GeoJSON could not be loaded from `{resolved_path}`."
         )
     elif centroids is None or len(centroids) == 0:
         # Show a debug panel so the user can see what went wrong
