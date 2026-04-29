@@ -387,30 +387,63 @@ h3 {
 
 /* ── Inputs ── */
 .stTextInput input, .stNumberInput input {
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.03) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border) !important;
     border-radius: 8px;
     font-size: 13px;
     padding: 0.5rem 0.75rem;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .stTextInput input:focus, .stNumberInput input:focus {
-    border-color: var(--accent);
+    border-color: var(--accent) !important;
     box-shadow: 0 0 0 3px var(--accent-glow);
     outline: none;
 }
+/* BaseWeb wrappers around inputs (number_input has a wrapper that paints white in light mode) */
+.stTextInput [data-baseweb="input"],
+.stTextInput [data-baseweb="base-input"],
+.stNumberInput [data-baseweb="input"],
+.stNumberInput [data-baseweb="base-input"],
+[data-testid="stNumberInputContainer"],
+[data-testid="stTextInputRootElement"] {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+}
+/* Number input +/- step buttons */
+.stNumberInput button {
+    background: rgba(255, 255, 255, 0.03) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+}
+.stNumberInput button:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
 
 /* ── Select ── */
+.stSelectbox [data-baseweb="select"] > div,
+.stSelectbox [data-baseweb="select"] > div > div,
+.stMultiSelect [data-baseweb="select"] > div,
+.stMultiSelect [data-baseweb="select"] > div > div {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border-color: var(--border) !important;
+    color: var(--text-primary) !important;
+}
 .stSelectbox [data-baseweb="select"] > div {
-    background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
     border-radius: 8px;
-    color: var(--text-primary);
     font-size: 13px;
     transition: border-color 0.15s ease;
 }
-.stSelectbox [data-baseweb="select"] > div:hover { border-color: var(--border-hover); }
+.stSelectbox [data-baseweb="select"] > div:hover { border-color: var(--border-hover) !important; }
+/* The visible "value" text inside the select */
+.stSelectbox [data-baseweb="select"] [data-testid="stWidgetLabel"],
+.stSelectbox [data-baseweb="select"] span,
+.stSelectbox [data-baseweb="select"] input {
+    color: var(--text-primary) !important;
+    background: transparent !important;
+}
 [data-baseweb="popover"] {
     background: var(--bg-elevated) !important;
     border: 1px solid var(--border) !important;
