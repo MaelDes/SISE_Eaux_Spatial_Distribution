@@ -117,9 +117,19 @@ _PREMIUM_CSS = """
 html, body, .stApp,
 [data-testid="stAppViewContainer"],
 [data-testid="stHeader"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
+[data-testid="stBottomBlockContainer"],
+.stMain, .stMainBlockContainer,
 .main, .block-container {
     background-color: #09090b !important;
     color: #fafafa !important;
+}
+/* Catch-all for any Streamlit container with a white inline/light background */
+.stApp [class*="block-container"],
+.stApp section[tabindex],
+.stApp section.main {
+    background-color: transparent !important;
 }
 /* Native widgets that read system colors (selects, popovers, dialogs) */
 [data-baseweb="popover"],
@@ -138,6 +148,31 @@ html, body, .stApp,
 .stRadio label, .stCheckbox label,
 [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p {
     color: #fafafa !important;
+}
+
+/* ── Plotly — force transparent canvas so our card background shows
+   through, and recolor Plotly's modebar / svg text. The Python-side
+   template also sets paper/plot bgcolor to transparent, but in light
+   mode Plotly's own CSS injects white backgrounds on .main-svg and
+   .plot-container, so we override here. */
+[data-testid="stPlotlyChart"] .js-plotly-plot,
+[data-testid="stPlotlyChart"] .plot-container,
+[data-testid="stPlotlyChart"] .svg-container,
+[data-testid="stPlotlyChart"] .main-svg {
+    background-color: transparent !important;
+}
+[data-testid="stPlotlyChart"] .modebar {
+    background: transparent !important;
+}
+[data-testid="stPlotlyChart"] .modebar-btn path {
+    fill: #a1a1aa !important;
+}
+[data-testid="stPlotlyChart"] .modebar-btn:hover path {
+    fill: #fafafa !important;
+}
+/* Plotly's default white rect inside the SVG (the one that paints the plot area) */
+[data-testid="stPlotlyChart"] .main-svg .bg {
+    fill: transparent !important;
 }
 
 /* ── Color tokens ── */
@@ -1010,7 +1045,7 @@ with tab_corr:
                 title=f"Correlation ({corr_method.capitalize()}) — N = {len(sub):,}",
                 yaxis=dict(autorange="reversed"),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, theme=None)
 
             with st.expander("Download matrix as CSV"):
                 st.download_button(
@@ -1135,7 +1170,7 @@ with tab_scatter_c:
                   + (f" — color: {pretty(z_col)}" if z_col != "(none)" else "")
                   + f"  (N = {len(sub):,})"
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, theme=None)
 
 
 # ============================================================================
@@ -1194,7 +1229,7 @@ with tab_reg:
                        f"  |  R² = {r_squared:.3f}, p = {p_value:.2e}, "
                        f"N = {len(sub):,}")
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, theme=None)
 
             st.markdown(
                 f"**Pearson**: r = {r_pearson:.3f}, p = {p_pearson:.2e}  \n"
@@ -1338,7 +1373,7 @@ with tab_dist:
             height=500,
             title=f"Filtered (N={n_filt:,}) vs All (N={n_tot:,})",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, theme=None)
 
         if stats_rows:
             st.markdown("**Summary statistics**")
@@ -1667,7 +1702,7 @@ with tab_piper:
                     height=750, showlegend=False,
                     plot_bgcolor="rgba(0,0,0,0)",
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, theme=None)
 
                 st.caption(
                     "Left triangle: cation facies (Ca, Mg, Na+K). "
@@ -1740,7 +1775,7 @@ with tab_3d:
                 zaxis_title=pretty(z3),
             ),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, theme=None)
 
         with st.expander("Optional: fit a response surface Z = f(X, Y)"):
             st.markdown(
@@ -1771,7 +1806,7 @@ with tab_3d:
                 fig.add_trace(go.Surface(x=gx, y=gy, z=gZ,
                                          opacity=0.35, showscale=False,
                                          colorscale="Greys", name="Fit"))
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, theme=None)
 
 
 # ============================================================================
@@ -2251,6 +2286,10 @@ with tab_map:
                             title=title_text,
                             height=720,
                             margin=dict(l=0, r=0, t=50, b=0),
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color="#e4e4e7"),
+                            title_font=dict(color="#fafafa"),
                         )
                 else:
                     # Choropleth (slow but pretty)
@@ -2284,6 +2323,10 @@ with tab_map:
                             title=title_text,
                             height=720,
                             margin=dict(l=0, r=0, t=50, b=0),
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color="#e4e4e7"),
+                            title_font=dict(color="#fafafa"),
                             geo=dict(
                                 projection=dict(type="mercator"),
                                 scope="europe",
@@ -2291,7 +2334,7 @@ with tab_map:
                             ),
                         )
 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, theme=None)
 
                 # --- Bottom panel : top extreme communes + download ---
                 bot_l, bot_r = st.columns([3, 1])
