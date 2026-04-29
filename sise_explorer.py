@@ -107,6 +107,39 @@ _PREMIUM_CSS = """
 <style>
 /* SISE Explorer - Premium UI */
 
+/* ── FORCE DARK MODE — defensive override ──────────────────────────
+   Even if Streamlit boots in light mode (user preference, system theme,
+   or missing .streamlit/config.toml), this guarantees a dark canvas so
+   the premium tokens below render correctly. */
+:root {
+    color-scheme: dark !important;
+}
+html, body, .stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"],
+.main, .block-container {
+    background-color: #09090b !important;
+    color: #fafafa !important;
+}
+/* Native widgets that read system colors (selects, popovers, dialogs) */
+[data-baseweb="popover"],
+[data-baseweb="menu"],
+[data-baseweb="select"] [role="listbox"] {
+    background-color: #18181b !important;
+    color: #fafafa !important;
+}
+/* Streamlit's light-mode tab/sidebar backgrounds — force them dark */
+[data-testid="stSidebar"],
+[data-testid="stSidebarContent"] {
+    background-color: rgba(9, 9, 11, 0.85) !important;
+}
+/* Default text colors for any element Streamlit renders white-on-white in light mode */
+.stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown span,
+.stRadio label, .stCheckbox label,
+[data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p {
+    color: #fafafa !important;
+}
+
 /* ── Color tokens ── */
 :root {
     --bg-base:       #09090b;
