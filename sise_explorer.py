@@ -607,25 +607,16 @@ footer { visibility: hidden; }
 </style>
 """
 
-# Inject CSS. We use st.html() if available (Streamlit 1.33+) since it
-# bypasses markdown processing and prevents stray characters from leaking
-# into the visible page. Fall back to st.markdown otherwise.
+
 try:
     st.html(_PREMIUM_CSS)
 except AttributeError:
     st.markdown(_PREMIUM_CSS, unsafe_allow_html=True)
 
-# Default candidate files in the project root
 DEFAULT_CLASSIFIED = "stats/classified_annual_data.csv"
 DEFAULT_CSV_GLOB   = "csv_traite/Analyses_insee_*.csv"
 
-# ---------------------------------------------------------------------------
-# Cloud deployment: the dataset is too large for the Git repo, so we host
-# it in a GitHub Release and download it on first launch. Once cached on
-# disk, subsequent loads are instant.
-#
-# REPLACE this URL with your own GitHub Release asset URL.
-# ---------------------------------------------------------------------------
+
 CLASSIFIED_URL   = (
     "https://github.com/MaelDes/SISE_Eaux_Spatial_Distribution/"
     "releases/download/v1.0/classified_annual_data.csv"
@@ -634,12 +625,7 @@ CACHE_CLASSIFIED = ".cache/classified_annual_data.csv"
 
 
 def _resolve_classified_path(user_path: str) -> str | None:
-    """
-    Resolve the dataset path:
-      1. The user-provided local path, if it exists
-      2. The internal cache file, if it exists
-      3. Download from CLASSIFIED_URL into the cache (cloud deployment)
-    """
+
     import urllib.request, urllib.error
 
     if user_path and Path(user_path).exists():
@@ -667,7 +653,6 @@ def _resolve_classified_path(user_path: str) -> str | None:
         )
         return None
 
-# Columns that identify a sample (never used as numerical variables)
 ID_COLS = {
     "referenceprel", "dateprel", "nomcommuneprinc", "inseecommuneprinc",
     "Year", "Annee", "longitude", "latitude",
@@ -706,14 +691,12 @@ def pretty(c: str) -> str:
 
 @st.cache_data(show_spinner=False)
 def load_classified(path: str) -> pd.DataFrame:
-    """Load the pre-aggregated file produced by sise_stats.py"""
     df = pd.read_csv(path, low_memory=False)
     return df
 
 
 @st.cache_data(show_spinner=False)
 def load_and_aggregate(csv_paths: list[str]) -> pd.DataFrame:
-    """Load yearly SISE CSVs and aggregate by commune x year."""
     from sise_pipeline import (
         load_csv_files, compute_indices,
         COL_PH, COL_PH_EQ, COL_TEMP, COL_CA, COL_MG, COL_HCO3,
@@ -757,24 +740,20 @@ def _is_truly_numeric(series: pd.Series, threshold: float = 0.8) -> bool:
     s = series.dropna()
     if len(s) == 0:
         return False
-    # For Categorical: inspect the categories themselves, not the codes
     if isinstance(s.dtype, pd.CategoricalDtype):
         cats = s.cat.categories
         coerced = pd.to_numeric(pd.Series(cats), errors="coerce")
         return (1 - coerced.isna().mean()) >= threshold
-    # For everything else: try coercing the values
     coerced = pd.to_numeric(s, errors="coerce")
     return (1 - coerced.isna().mean()) >= threshold
 
 
 def numeric_columns(df: pd.DataFrame) -> list[str]:
-    """All columns with actual numeric content (see _is_truly_numeric)."""
     return [c for c in df.columns
             if c not in ID_COLS and _is_truly_numeric(df[c])]
 
 
 def categorical_columns(df: pd.DataFrame) -> list[str]:
-    """All columns with actual non-numeric content."""
     return [c for c in df.columns
             if c not in ID_COLS and not _is_truly_numeric(df[c])]
 
@@ -890,7 +869,6 @@ st.sidebar.header("Filters")
 num_cols = numeric_columns(df)
 cat_cols = categorical_columns(df)
 
-# Year filter if Year column exists
 for year_col in ("Year", "Annee"):
     if year_col in df.columns:
         years = sorted(df[year_col].dropna().unique())
@@ -901,7 +879,6 @@ for year_col in ("Year", "Annee"):
             df = df[df[year_col].isin(sel_years)]
         break
 
-# Categorical filter (one at a time)
 if cat_cols:
     filt_col = st.sidebar.selectbox(
         "Filter by category (optional)",
@@ -915,7 +892,6 @@ if cat_cols:
         )
         df = df[df[filt_col].astype(str).isin(selected)]
 
-# Outlier filter (IQR-based)
 st.sidebar.markdown("**Outlier filter (IQR)**")
 iqr_factor = st.sidebar.select_slider(
     "Replace outliers beyond Q1/Q3 ± k × IQR with NaN",
@@ -930,8 +906,7 @@ iqr_factor = st.sidebar.select_slider(
     ),
 )
 if iqr_factor > 0:
-    # Winsorisation per column: masks individual outlying values (sets to NaN)
-    # instead of dropping rows. Safer for multivariate analysis.
+
     target_cols = [c for c in num_cols if c not in {"Year", "Annee", "N_mesures",
                                                      "longitude", "latitude"}]
     if target_cols:
@@ -1107,7 +1082,6 @@ with tab_scatter_c:
     log_y = c4.checkbox("log Y", value=False)
     marginals = c4.checkbox("Marginal distributions", value=True)
 
-    # Build a deduplicated column list (handles X == Y or X == Z etc.)
     wanted_cols = [x_col, y_col]
     if z_col != "(none)":
         wanted_cols.append(z_col)
@@ -1116,7 +1090,6 @@ with tab_scatter_c:
 
     st.caption(f"N = {len(sub):,} points")
 
-    # Robust categorical detection based on the same helper used for column lists.
     color_is_categorical = False
     if z_col != "(none)" and z_col in sub.columns:
         color_is_categorical = not _is_truly_numeric(sub[z_col])
@@ -1131,7 +1104,6 @@ with tab_scatter_c:
         if color_is_categorical and z_col != "(none)":
             plot_df[z_col] = plot_df[z_col].astype(str)
 
-        # Build the scatter WITHOUT marginals (stable path for any color type)
         color_arg = None if z_col == "(none)" else z_col
         fig_scatter = px.scatter(
             plot_df, x=x_col, y=y_col,
@@ -1149,8 +1121,7 @@ with tab_scatter_c:
         if not marginals:
             fig = fig_scatter
         else:
-            # Build marginals manually to sidestep the known Plotly bug with
-            # histograms + categorical color (`color='V'` error).
+
             from plotly.subplots import make_subplots
 
             fig = make_subplots(
@@ -1163,7 +1134,6 @@ with tab_scatter_c:
                        [{"type": "xy"}, {"type": "xy"}]],
             )
 
-            # Top marginal: histogram of X (single color, no grouping)
             fig.add_trace(
                 go.Histogram(
                     x=plot_df[x_col], nbinsx=40,
@@ -1172,7 +1142,6 @@ with tab_scatter_c:
                 ),
                 row=1, col=1,
             )
-            # Right marginal: histogram of Y
             fig.add_trace(
                 go.Histogram(
                     y=plot_df[y_col], nbinsy=40,
@@ -1181,11 +1150,9 @@ with tab_scatter_c:
                 ),
                 row=2, col=2,
             )
-            # Main scatter traces (copied from the px figure we built)
             for tr in fig_scatter.data:
                 fig.add_trace(tr, row=2, col=1)
 
-            # Copy coloraxis/legend layout from px figure
             fig.update_layout(
                 coloraxis=fig_scatter.layout.coloraxis,
                 height=650,
@@ -1230,11 +1197,9 @@ with tab_reg:
             x = sub[x_col].values
             y = sub[y_col].values
 
-            # Pearson correlation
             r_pearson, p_pearson = stats.pearsonr(x, y)
             r_spearman, p_spearman = stats.spearmanr(x, y)
 
-            # OLS regression
             slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
             r_squared = r_value ** 2
 
@@ -1248,7 +1213,6 @@ with tab_reg:
                       delta="significant" if p_value < 0.05 else "n.s.",
                       delta_color="normal")
 
-            # Scatter + regression line
             fig = px.scatter(
                 sub, x=x_col, y=y_col,
                 trendline="ols",
@@ -1425,26 +1389,17 @@ def piper_ternary_coords(ca, mg, na_k, cl, so4, hco3):
       - Right ternary (anions):  HCO3, Cl, SO4
       - Central diamond: projection of both
     """
-    # Cation ternary (left): we use (Ca, Mg, Na+K) summing to 100
-    # Anion ternary (right): (HCO3, Cl, SO4) summing to 100
-    # Classical Piper layout has triangles apex-up, centered below the diamond.
 
-    # Cation ternary: apex Mg at top; bottom-left Ca, bottom-right Na+K
     cx = (na_k + 0.5 * mg) * 0.01
     cy = (mg * np.sqrt(3) / 2) * 0.01
 
-    # Anion ternary: apex SO4 at top; bottom-left HCO3, bottom-right Cl
     ax = (cl + 0.5 * so4) * 0.01 + 1.2  # shifted right by 1.2
     ay = (so4 * np.sqrt(3) / 2) * 0.01
 
-    # Diamond: constructed from projections.
-    # Standard formula: project cation (Na+K) and anion (SO4+Cl) to diamond space.
-    # We use the widely-used formulas (see Piper 1944 / USGS docs).
     d_x = 0.5 + 0.5 * ((na_k - ca) + (cl - hco3)) * 0.01 + 0.3
     d_y = 0.5 + 0.5 * ((na_k + ca) + (cl + hco3)) * 0.0 + \
           0.5 * (mg + so4) * 0.01 + 0.8
-    # Simpler and well-known: diamond x = (%Na+K + %Cl) / 2
-    #                          diamond y = (%Mg + %SO4) / 2 (+ offset)
+
     dx = ((na_k + cl) / 2) * 0.01 + 0.2
     dy = ((mg + so4) / 2) * 0.01 * np.sqrt(3) + 1.0
 
@@ -1512,16 +1467,13 @@ with tab_piper:
         if len(meq) < 2:
             st.warning("Not enough valid rows after meq/L conversion.")
         else:
-            # --- Percentages of each cation / anion over their respective sum ---
             cat_sum = meq["CALCIUM"] + meq["MAGNESIUM"] + meq["SODIUM"] + meq["POTASSIUM"]
             an_sum  = meq["HYDROGENOCARBONATES"] + meq["CHLORURES"] + meq["SULFATES"]
-            # Drop rows with null sums
             valid = (cat_sum > 0) & (an_sum > 0)
             meq = meq[valid]
             cat_sum = cat_sum[valid]
             an_sum  = an_sum[valid]
 
-            # Fractions (0-1) — normalized
             ca   = (meq["CALCIUM"] / cat_sum).values
             mg   = (meq["MAGNESIUM"] / cat_sum).values
             nak  = ((meq["SODIUM"] + meq["POTASSIUM"]) / cat_sum).values
@@ -1545,12 +1497,10 @@ with tab_piper:
             OFF = 2.0            # horizontal offset between triangle centers
             GAP_Y = 0.25         # vertical gap between diamond bottom and triangle tops
 
-            # Cation point in left triangle
             # Ca=(0,0), NaK=(1,0), Mg=(0.5, h)  -> barycentric
             cx = ca * 0 + nak * 1 + mg * 0.5
             cy = ca * 0 + nak * 0 + mg * h
 
-            # Anion point in right triangle (shifted by OFF)
             # HCO3=(OFF,0), Cl=(OFF+1,0), SO4=(OFF+0.5,h)
             ax_ = hco3 * OFF + cl * (OFF + 1) + so4 * (OFF + 0.5)
             ay_ = hco3 * 0 + cl * 0 + so4 * h
@@ -1568,7 +1518,6 @@ with tab_piper:
             with c2:
                 fig = go.Figure()
 
-                # --- Triangle outlines ---
                 tri_color = "rgba(255,255,255,0.18)"
                 # Cation triangle
                 fig.add_trace(go.Scatter(
@@ -1576,7 +1525,6 @@ with tab_piper:
                     mode="lines", line=dict(color=tri_color, width=1.5),
                     hoverinfo="skip", showlegend=False,
                 ))
-                # Anion triangle
                 fig.add_trace(go.Scatter(
                     x=[OFF, OFF + 1, OFF + 0.5, OFF],
                     y=[0, 0, h, 0],
@@ -1604,7 +1552,6 @@ with tab_piper:
                     """Draw the 3 families of parallel gridlines inside a triangle."""
                     A, B, C = np.array(A), np.array(B), np.array(C)
                     for t in np.arange(step, 1.0 - 1e-9, step):
-                        # Lines parallel to BC (opposite of A)
                         P1 = A + t * (B - A)
                         P2 = A + t * (C - A)
                         fig.add_trace(go.Scatter(
@@ -1612,7 +1559,6 @@ with tab_piper:
                             mode="lines", line=dict(color=color, width=0.7),
                             hoverinfo="skip", showlegend=False,
                         ))
-                        # Lines parallel to AC (opposite of B)
                         P1 = B + t * (A - B)
                         P2 = B + t * (C - B)
                         fig.add_trace(go.Scatter(
@@ -1620,7 +1566,6 @@ with tab_piper:
                             mode="lines", line=dict(color=color, width=0.7),
                             hoverinfo="skip", showlegend=False,
                         ))
-                        # Lines parallel to AB (opposite of C)
                         P1 = C + t * (A - C)
                         P2 = C + t * (B - C)
                         fig.add_trace(go.Scatter(
@@ -1629,9 +1574,7 @@ with tab_piper:
                             hoverinfo="skip", showlegend=False,
                         ))
 
-                # Cation triangle: Ca (bottom-left), Na+K (bottom-right), Mg (apex)
                 add_triangle_grid((0, 0), (1, 0), (0.5, h))
-                # Anion triangle: HCO3 (bottom-left), Cl (bottom-right), SO4 (apex)
                 add_triangle_grid((OFF, 0), (OFF + 1, 0), (OFF + 0.5, h))
 
                 # Diamond: 4 families of parallel lines (2 pairs).
@@ -1663,26 +1606,22 @@ with tab_piper:
                         hoverinfo="skip", showlegend=False,
                     ))
 
-                # --- Hover text ---
                 hover = [
                     f"Ca={c*100:.0f}% | Mg={m*100:.0f}% | Na+K={nk*100:.0f}%<br>"
                     f"HCO3={hc*100:.0f}% | Cl={cl_*100:.0f}% | SO4={s*100:.0f}%"
                     for c, m, nk, hc, cl_, s in zip(ca, mg, nak, hco3, cl, so4)
                 ]
 
-                # --- Color data ---
                 color_values = None
                 colorscale = None
                 colorbar = None
                 if color_by != "(none)" and color_by in sample.columns:
                     color_data = sample.loc[meq.index, color_by]
-                    # Use the same robust numeric detection as Tab 2
                     if _is_truly_numeric(color_data):
                         color_values = pd.to_numeric(color_data, errors="coerce").values
                         colorscale = "Viridis"
                         colorbar = dict(title=pretty(color_by))
                     else:
-                        # Categorical -> map to integers
                         cats = color_data.astype(str).astype("category")
                         color_values = cats.cat.codes.values
                         colorscale = "Turbo"
@@ -1711,17 +1650,13 @@ with tab_piper:
                 fig.add_trace(scatter_trace(ax_, ay_, showcbar=False))
                 fig.add_trace(scatter_trace(dx, dy, showcbar=(color_values is not None)))
 
-                # --- Corner labels ---
                 lbl = dict(size=14, color="#fafafa")
-                # Cation triangle
                 fig.add_annotation(x=0,    y=-0.06, text="<b>Ca²⁺</b>",   showarrow=False, font=lbl)
                 fig.add_annotation(x=1,    y=-0.06, text="<b>Na⁺+K⁺</b>", showarrow=False, font=lbl)
                 fig.add_annotation(x=0.5,  y=h + 0.06, text="<b>Mg²⁺</b>",showarrow=False, font=lbl)
-                # Anion triangle
                 fig.add_annotation(x=OFF,      y=-0.06, text="<b>HCO₃⁻</b>", showarrow=False, font=lbl)
                 fig.add_annotation(x=OFF + 1,  y=-0.06, text="<b>Cl⁻</b>",   showarrow=False, font=lbl)
                 fig.add_annotation(x=OFF+0.5,  y=h + 0.06, text="<b>SO₄²⁻</b>", showarrow=False, font=lbl)
-                # Diamond corners
                 fig.add_annotation(x=1.0 - 0.05, y=2*h, text="<b>Ca+Mg</b>",     showarrow=False, font=lbl, xanchor="right")
                 fig.add_annotation(x=2.0 + 0.05, y=2*h, text="<b>Na+K+Cl+SO₄</b>", showarrow=False, font=lbl, xanchor="left")
                 fig.add_annotation(x=1.5, y=3*h + 0.06, text="<b>SO₄+Cl</b>",   showarrow=False, font=lbl)
@@ -1771,7 +1706,6 @@ with tab_3d:
 
     n_max = st.slider("Max points (3D gets slow above ~5000)", 500, min(15000, len(df)),
                       min(3000, len(df)), step=500)
-    # Deduplicate (handles X==Y or Z==color etc.)
     wanted = [x3, y3, z3]
     if color3 != "(none)":
         wanted.append(color3)
@@ -1929,7 +1863,6 @@ def _precompute_centroids(path: str, _version: int = 3) -> pd.DataFrame | None:
     if not features:
         return None
 
-    # --- Auto-detect the INSEE code field across the first 50 features ---
     pattern = re.compile(r"^[\dA-Za-z]{5}$")
     candidate_keys = {}
     for feat in features[:50]:
@@ -1939,13 +1872,11 @@ def _precompute_centroids(path: str, _version: int = 3) -> pd.DataFrame | None:
                 continue
             if pattern.match(str(v).strip()):
                 candidate_keys[k] = candidate_keys.get(k, 0) + 1
-    # Prefer keys whose name suggests an INSEE code, then by frequency
     def _key_score(k):
         name_bonus = 100 if re.search(r"code|insee|geo", k, re.I) else 0
         return name_bonus + candidate_keys[k]
     insee_key = max(candidate_keys, key=_key_score) if candidate_keys else None
 
-    # Find a "name" field
     first_props = features[0].get("properties") or {}
     name_key = None
     for k in ("nom", "NOM_COM", "name", "libelle", "nom_com"):
@@ -1953,7 +1884,6 @@ def _precompute_centroids(path: str, _version: int = 3) -> pd.DataFrame | None:
             name_key = k
             break
 
-    # Fallback: top-level id
     use_top_id = (insee_key is None) and any(f.get("id") for f in features[:5])
 
     rows = []
@@ -1973,12 +1903,9 @@ def _precompute_centroids(path: str, _version: int = 3) -> pd.DataFrame | None:
         if not coords:
             continue
         gtype = geom.get("type")
-        # Extract a list of (lon, lat) pairs from the geometry
         if gtype == "Polygon":
-            # coords = [outer_ring, hole1, hole2, ...] — take outer ring
             pts = coords[0] if coords else None
         elif gtype == "MultiPolygon":
-            # coords = [poly1, poly2, ...], each poly = [outer_ring, ...]
             try:
                 largest = max(coords, key=lambda poly: len(poly[0]) if poly and poly[0] else 0)
                 pts = largest[0] if largest else None
@@ -2033,12 +1960,10 @@ def _param_config() -> dict:
 
 
 def _is_index_param(param: str) -> bool:
-    """Indices use a diverging colorscale (centered on equilibrium value)."""
     return param in {"IL", "IL_calc", "ryznar", "Larson", "Bason"}
 
 
 def _index_zero(param: str) -> float | None:
-    """Equilibrium value for diverging colorscales."""
     return {
         "IL": 0.0, "IL_calc": 0.0,
         "ryznar": 6.5,    # midpoint of the balanced zone (6.2–6.8)
@@ -2055,11 +1980,7 @@ def _aggregate_for_map(
     year: int | None,
     code_col: str,
 ) -> pd.DataFrame:
-    """
-    Aggregate the dataframe to (commune, mean_value, n_measures) for one
-    parameter and optionally one year. The first arg is a pickle-key just to
-    let Streamlit invalidate the cache when df changes.
-    """
+
     work = df[[code_col, param]].copy()
     if year is not None and "Year" in df.columns:
         work = work.assign(Year=df["Year"])
@@ -2074,7 +1995,6 @@ def _aggregate_for_map(
             .agg(value=(param, "mean"), n=(param, "size"))
     )
     grouped = grouped.rename(columns={code_col: "code"})
-    # Pad INSEE codes to 5 chars to match GeoJSON (e.g. 1001 -> "01001")
     grouped["code"] = grouped["code"].astype(str).str.zfill(5)
     return grouped
 
@@ -2137,7 +2057,6 @@ with tab_map:
                 "to your specific GeoJSON format."
             )
     else:
-        # Identify INSEE code column in the dataframe
         code_col = next(
             (c for c in ("inseecommuneprinc", "code_insee", "INSEE_COM", "code")
              if c in df.columns),
@@ -2149,7 +2068,6 @@ with tab_map:
                 "Expected one of: `inseecommuneprinc`, `code_insee`, `INSEE_COM`, `code`."
             )
         else:
-            # Identify GeoJSON feature key
             sample_props = geojson["features"][0].get("properties", {})
             if "code" in sample_props:
                 feature_key = "properties.code"
@@ -2160,7 +2078,6 @@ with tab_map:
             else:
                 feature_key = "id"
 
-            # --- Controls ---
             cfg = _param_config()
             available_params = [c for c in num_cols if c in cfg or c.upper() in cfg]
             chem_first = sorted([p for p in available_params if not _is_index_param(p)])
@@ -2203,7 +2120,6 @@ with tab_map:
                          "(slower but prettier, use it for the final article figure).",
                 )
 
-            # --- Aggregate ---
             df_key = f"{len(df)}_{map_param}_{map_year}_{iqr_factor}"
             with st.spinner("Aggregating commune values..."):
                 agg = _aggregate_for_map(df_key, df, map_param, map_year, code_col)
@@ -2211,18 +2127,15 @@ with tab_map:
             if agg.empty:
                 st.warning("No data available for this parameter / year combination.")
             else:
-                # Normalize codes on both sides (strip, zfill, str)
                 agg = agg.copy()
                 agg["code"] = agg["code"].astype(str).str.strip().str.zfill(5)
                 cent = centroids.copy()
                 cent["code"] = cent["code"].astype(str).str.strip().str.zfill(5)
 
-                # Merge centroids on INSEE code (used for Fast mode)
                 agg_pts = agg.merge(cent, on="code", how="left").dropna(
                     subset=["lon", "lat"]
                 )
 
-                # Diagnostic if matching failed
                 n_unmatched = len(agg) - len(agg_pts)
                 if n_unmatched > 0 and len(agg_pts) == 0:
                     st.error(
@@ -2242,7 +2155,6 @@ with tab_map:
                         f"(matched {len(agg_pts):,}/{len(agg):,})"
                     )
 
-                # --- Color scale ---
                 cfg_p = cfg.get(map_param, {"label": map_param, "cmin": None, "cmax": None})
                 label = cfg_p["label"]
                 vals = agg["value"]
@@ -2259,13 +2171,11 @@ with tab_map:
                     cmin, cmax, cmid = lo, hi, None
                     colorscale = "Viridis"
 
-                # --- KPI cards ---
                 k1, k2, k3 = st.columns(3)
                 k1.metric("Communes", f"{len(agg):,}")
                 k2.metric("Mean", f"{vals.mean():.2f}")
                 k3.metric("Median", f"{vals.median():.2f}")
 
-                # --- Build map ---
                 title_year = f"— {map_year}" if map_year else "— all years pooled"
                 title_text = (f"<b>{label}</b> {title_year}  ·  "
                               f"N = {agg['n'].sum():,} measurements  ·  "
@@ -2325,7 +2235,6 @@ with tab_map:
                             title_font=dict(color="#fafafa"),
                         )
                 else:
-                    # Choropleth (slow but pretty)
                     with st.spinner(f"Rendering polygons for {len(agg):,} communes..."):
                         fig = go.Figure(go.Choropleth(
                             geojson=geojson,
@@ -2369,7 +2278,6 @@ with tab_map:
 
                 st.plotly_chart(fig, use_container_width=True, theme=None)
 
-                # --- Bottom panel : top extreme communes + download ---
                 bot_l, bot_r = st.columns([3, 1])
                 with bot_l:
                     with st.expander("Top 10 communes — highest values"):
@@ -2416,7 +2324,6 @@ with tab_map:
 # --- Helpers (defined here, used only in this tab to keep things local) ---
 
 def _commune_find_insee_col(df: pd.DataFrame) -> str | None:
-    """Locate the INSEE column without ever scanning column contents."""
     for c in ("inseecommuneprinc", "code_insee", "INSEE_COM", "code", "insee",
               "INSEE", "code_commune", "commune_code", "CODE_INSEE"):
         if c in df.columns:
@@ -2425,7 +2332,6 @@ def _commune_find_insee_col(df: pd.DataFrame) -> str | None:
 
 
 def _commune_find_name_col(df: pd.DataFrame) -> str | None:
-    """Locate the commune-name column."""
     for c in ("nomcommuneprinc", "nom_commune", "NOM_COM", "nom", "commune",
               "name", "libelle", "COMMUNE", "Commune"):
         if c in df.columns:
@@ -2435,14 +2341,12 @@ def _commune_find_name_col(df: pd.DataFrame) -> str | None:
 
 @st.cache_data(show_spinner=False, max_entries=2)
 def _commune_index_from_pairs(pairs: tuple) -> pd.DataFrame:
-    """Build commune lookup table from a small hashable tuple of (insee, name)."""
     import unicodedata
     if not pairs:
         return pd.DataFrame()
     df_idx = pd.DataFrame(pairs, columns=["insee", "name"])
     df_idx["insee"] = df_idx["insee"].astype(str).str.strip().str.zfill(5)
     df_idx["name"]  = df_idx["name"].astype(str).str.strip()
-    # Build a normalized search key: lowercase + accent-stripped
     def _normalize(s: str) -> str:
         s = s.lower()
         s = unicodedata.normalize("NFKD", s)
@@ -2455,10 +2359,7 @@ def _commune_index_from_pairs(pairs: tuple) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False, max_entries=2)
 def _commune_national_means(numeric_pairs: tuple) -> dict:
-    """
-    Pre-compute the national mean for every numeric column once per session.
-    Lookup is then O(1).
-    """
+
     return dict(numeric_pairs)
 
 
@@ -2488,9 +2389,7 @@ with tab_commune:
         with st.expander("Debug — available columns"):
             st.code(list(df.columns))
     else:
-        # Build a *small* tuple of (insee, name) pairs, hashable & cacheable.
-        # If the dataset itself has no name column, fall back to the GeoJSON
-        # which always carries the commune name in its properties.
+
         pairs = None
         if name_col:
             small = (df[[insee_col, name_col]]
@@ -2499,7 +2398,6 @@ with tab_commune:
             pairs = tuple(zip(small[insee_col].astype(str),
                               small[name_col].astype(str)))
         else:
-            # Try to enrich from the GeoJSON centroids (which include `name`)
             try:
                 resolved = _resolve_geojson_path(DEFAULT_GEOJSON)
                 if resolved:
@@ -2520,20 +2418,17 @@ with tab_commune:
                         )
             except Exception:
                 pass
-            # Last resort: just show INSEE codes
             if pairs is None:
                 small = df[[insee_col]].dropna().drop_duplicates()
                 pairs = tuple((str(v), f"INSEE {v}") for v in small[insee_col])
 
         commune_idx = _commune_index_from_pairs(pairs)
 
-        # Pre-compute national means once
         nat_means = _commune_national_means(
             tuple((c, float(df[c].mean()))
                   for c in num_cols if c in df.columns)
         )
 
-        # ---------- Search box ----------
         col_search, col_count = st.columns([3, 1])
         with col_search:
             query = st.text_input(
@@ -2544,19 +2439,16 @@ with tab_commune:
         with col_count:
             st.metric("Communes indexed", f"{len(commune_idx):,}")
 
-        # ---------- Filtering (CHEAP, runs only when query changes) ----------
         if not query or len(query.strip()) < 2:
             st.info(
                 "Type at least 2 characters in the search box above to see "
                 "matching communes."
             )
         else:
-            # Normalize the query the same way as the index (lowercase + strip accents)
             import unicodedata
             q = query.strip().lower()
             q = unicodedata.normalize("NFKD", q)
             q = "".join(ch for ch in q if not unicodedata.combining(ch))
-            # Match on name OR insee — pandas is fast enough on 33k rows
             mask = (
                 commune_idx["search_key"].str.contains(q, regex=False, na=False)
                 | commune_idx["insee"].str.startswith(q)
@@ -2569,7 +2461,6 @@ with tab_commune:
                     st.markdown("**Sample of names in the dataset:**")
                     sample = commune_idx[["insee", "name"]].head(10)
                     st.dataframe(sample, hide_index=True, use_container_width=True)
-                    # Try a substring-anywhere match for debugging
                     rough = commune_idx[
                         commune_idx["search_key"].str.contains(q[:3], regex=False, na=False)
                     ].head(5)
@@ -2582,7 +2473,6 @@ with tab_commune:
                         "extra suffixes...), copy-paste this back to me."
                     )
             else:
-                # Build a tiny selectbox with only the 10 candidates
                 options = [
                     f"{r['name']} ({r['insee']})"
                     for _, r in matches.iterrows()
@@ -2594,12 +2484,9 @@ with tab_commune:
                     horizontal=False,
                 )
 
-                # Recover the INSEE from the chosen label
                 chosen_insee = chosen.split("(")[-1].rstrip(")")
                 chosen_name  = chosen.rsplit(" (", 1)[0]
 
-                # ---------- Subset for this commune ----------
-                # boolean mask is fast (33k comparisons), no need to cache
                 m = df[insee_col].astype(str).str.strip().str.zfill(5) == chosen_insee
                 sub = df[m]
 
@@ -2622,7 +2509,6 @@ with tab_commune:
                         if len(lt):
                             litho = lt.mode().iloc[0]
 
-                    # ---------- Header card ----------
                     meta_html = f"<div><b style='color:#fafafa'>{n_records}</b> record(s)</div>"
                     if years_present:
                         meta_html += f"<div>Years: <b style='color:#fafafa'>{', '.join(map(str, years_present))}</b></div>"
@@ -2651,7 +2537,6 @@ with tab_commune:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    # ---------- Two-column layout ----------
                     col_chem, col_idx = st.columns([3, 2])
 
                     with col_chem:
