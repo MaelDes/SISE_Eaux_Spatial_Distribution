@@ -66,7 +66,6 @@ COL_NO3   = "NITRATES (EN NO3)"
 COL_NA    = "SODIUM"
 COL_K     = "POTASSIUM"
 
-# Noms alternatifs avec accents (selon la version du fichier SISE)
 _COL_ALIASES = {
     "PH D'ÉQUILIBRE À LA T° ÉCHANTILLON": COL_PH_EQ,
     "TEMPÉRATURE DE L'EAU":               COL_TEMP,
@@ -184,7 +183,6 @@ def load_csv_files(
                    Indispensable si les CSV contiennent des centaines de
                    parametres SISE rares (evite MemoryError).
     """
-    # Si on filtre, on construit la liste complete a demander a pd.read_csv
     usecols = None
     if keep_columns is not None:
         base = ["referenceprel", "dateprel", "nomcommuneprinc", "inseecommuneprinc"]
@@ -194,7 +192,6 @@ def load_csv_files(
             if alias in wanted:
                 wanted.add(original)
 
-        # On lit d'abord les headers pour ne garder que les colonnes existantes
         sample_cols = set(pd.read_csv(csv_files[0], nrows=0).columns)
         usecols = [c for c in wanted if c in sample_cols]
         missing = wanted - sample_cols - set(base)
@@ -207,11 +204,8 @@ def load_csv_files(
     df = pd.concat(frames, ignore_index=True)
     df["dateprel"] = pd.to_datetime(df["dateprel"], errors="coerce")
 
-    # Normalisation des noms de colonnes (accents optionnels selon version SISE)
     df = df.rename(columns=_COL_ALIASES)
 
-    # Si apres renommage il y a des doublons (ex: deux variantes CALCIUM),
-    # on fusionne en gardant la premiere valeur non nulle
     if df.columns.duplicated().any():
         print(f"  Fusion de colonnes dupliquees apres normalisation des accents...")
         df = df.T.groupby(level=0).first().T
@@ -232,18 +226,15 @@ def compute_indices(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     cols = set(out.columns)
 
-    # Langelier (IL) et Ryznar
     if {COL_PH, COL_PH_EQ}.issubset(cols):
         out["IL"] = out[COL_PH] - out[COL_PH_EQ]
         out.loc[(out["IL"] < -7) | (out["IL"] > 6), "IL"] = np.nan
         out["ryznar"] = 2 * out[COL_PH_EQ] - out[COL_PH]
 
-    # TDS
     tds_cols = [COL_CA, COL_MG, COL_HCO3, COL_K, COL_NA, COL_SO4, COL_CL]
     if set(tds_cols).issubset(cols):
         out["TDS"] = out[tds_cols].sum(axis=1)
 
-    # IL calcule
     if {COL_TEMP, "TDS", COL_CA, COL_HCO3, COL_PH}.issubset(set(out.columns)):
         t = out[COL_TEMP]
         s = out["TDS"]
@@ -268,7 +259,6 @@ def compute_indices(df: pd.DataFrame) -> pd.DataFrame:
             + 7.7 + out["pKs_pKa"] + 2 * out["eps"]
         )
 
-    # Bason
     if {COL_PH, COL_PH_EQ, COL_CA, COL_MG, COL_SO4}.issubset(cols):
         lcsi = (
             200 * (9.5 - out[COL_PH])
@@ -278,7 +268,6 @@ def compute_indices(df: pd.DataFrame) -> pd.DataFrame:
         scsi = (0.6 * out[COL_MG] + 0.3 * out[COL_SO4]) / 3
         out["Bason"] = lcsi + scsi
 
-    # Larson
     if {COL_SO4, COL_CL, COL_HCO3}.issubset(cols):
         out["Larson"] = (out[COL_SO4] + out[COL_CL]) / out[COL_HCO3].replace(0, np.nan)
 
@@ -392,7 +381,6 @@ def geocode_from_geojson(
     print(f"Chargement GeoJSON : {Path(geojson_path).name} ...")
     gdf = gpd.read_file(geojson_path)
 
-    # Detection automatique de la colonne code INSEE
     candidates = ["code", "insee", "codgeo", "COM", "code_commune", "INSEE_COM"]
     code_field = next((c for c in candidates if c in gdf.columns), None)
     if code_field is None:
@@ -410,7 +398,6 @@ def geocode_from_geojson(
     )
 
     out = df.copy()
-    # Normalisation des codes INSEE sur 5 caracteres (ex: "75056" et non "75056.0")
     out[code_col]       = out[code_col].astype(str).str.split(".").str[0].str.zfill(5)
     centroids[code_col] = centroids[code_col].astype(str).str.split(".").str[0].str.zfill(5)
 
@@ -499,17 +486,14 @@ def make_map(
     cfg   = PARAM_CONFIG.get(param, {"label": param, "cmin": None, "cmax": None})
     label = cfg["label"]
 
-    # Bornes colorscale : percentiles 2-98 des moyennes communales
     vals = df[param].dropna()
     cmin = vals.quantile(0.02) if len(vals) else cfg["cmin"]
     cmax = vals.quantile(0.98) if len(vals) else cfg["cmax"]
-    # On respecte les bornes metier si plus restrictives
     if cfg["cmin"] is not None:
         cmin = max(cmin, cfg["cmin"])
     if cfg["cmax"] is not None:
         cmax = min(cmax, cfg["cmax"])
 
-    # Colonne annee (supporte "Annee" et "Année")
     annee_col = "Annee" if "Annee" in df.columns else "Année"
     annees = sorted(df[annee_col].dropna().unique().astype(int))
 
@@ -562,7 +546,6 @@ def make_map(
         )
         traces.append(trace)
 
-    # --- Stats globales pour le titre + sliders ---
     n_communes_by_year = {
         int(a): int((df[annee_col] == a).sum()) for a in annees
     }
@@ -611,7 +594,6 @@ def make_map(
 
     fig = go.Figure(data=traces)
 
-    # Annotation globale en bas de carte avec les totaux
     annotations = []
     if total_mesures:
         annotations.append(dict(
@@ -673,7 +655,6 @@ def run_map(
     n_annees = df["dateprel"].dt.year.nunique()
     print(f"Donnees chargees   : {len(df):,} lignes, {n_annees} annee(s)")
 
-    # Calcul des indices si necessaire
     if param in COMPUTED_INDICES:
         print("Calcul des indices d'agressivite...")
         df = compute_indices(df)
@@ -685,16 +666,13 @@ def run_map(
             f"Disponibles : {available}"
         )
 
-    # Outliers IQR sur les mesures brutes (avant agregation)
     if iqr_factor is not None:
         print(f"Suppression outliers IQR x{iqr_factor} (winsorisation)...")
         df = remove_outliers_iqr(df, param, iqr_factor=iqr_factor)
 
-    # Agregation annuelle
     annual = aggregate_annual(df, param)
     print(f"Apres agregation   : {len(annual):,} communes x annees")
 
-    # Geolocalisation
     if geojson_path is not None:
         annual = geocode_from_geojson(annual, geojson_path)
     elif geocache_path is not None:
@@ -718,13 +696,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # --- process ---
     p_proc = sub.add_parser("process", help="Traiter les fichiers bruts SISE")
     p_proc.add_argument("--result", required=True, help="DIS_RESULT_XXXX.txt")
     p_proc.add_argument("--plv",    required=True, help="DIS_PLV_XXXX.txt")
     p_proc.add_argument("--out",    required=True, help="CSV de sortie")
 
-    # --- map ---
     p_map = sub.add_parser("map", help="Generer une carte pour un parametre")
     p_map.add_argument("--param", required=True,
                        help="Parametre ou indice (ex: CALCIUM, IL, ryznar)")
@@ -759,7 +735,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Pause entre requetes Nominatim en secondes (defaut: 1.0)",
     )
 
-    # --- list-params ---
     sub.add_parser("list-params", help="Lister les parametres/indices disponibles")
 
     return parser
